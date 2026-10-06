@@ -22,7 +22,7 @@ let label_width: float = 104.0
 
 ## The sections in the order they show, and those that start open.
 func section_order() -> list[str]:
-    return ["White Balance", "Exposure & Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Geometry", "Effects", "View"]
+    return ["White Balance", "Exposure & Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Geometry", "Crop", "Effects", "View"]
 
 func opened() -> list[str]:
     return ["White Balance", "Exposure & Tone", "Color"]
@@ -54,7 +54,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop"]:
+    if name in ["view", "bw", "geometry_autocrop"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -103,11 +103,16 @@ pub class DevelopControls:
     var shot_temperature: float = 5500.0
     var shot_tint: float = 0.0
     var showing: bool = false
-    ## Whether the guide tool is on.
+    ## Whether the guide tool and the crop tool are on.
     pub var guiding: bool = false
+    pub var cropping: bool = false
     pub var on_change: func() -> unit!? = none
     pub var on_guide_tool: func(bool) -> unit!? = none
     pub var on_guides_cleared: func() -> unit!? = none
+    ## Called when the crop tool turns on or off, and with the aspect to keep
+    ## (width over height; 0 free, -1 the photo's own).
+    pub var on_crop_tool: func(bool, float) -> unit!? = none
+    pub var on_crop_aspect: func(float) -> unit!? = none
 
     pub func init(self, font: Font) -> unit!:
         self.look = look("")
@@ -160,6 +165,10 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "draw_guides", label = "Draw Guides", kind = ParameterKind.button, join = true))
             specs.insert(2, ParameterSpec(name = "clear_guides", label = "Clear Guides", kind = ParameterKind.button))
             specs.append(ParameterSpec(name = "geometry_autocrop", label = "Crop to Fit", kind = ParameterKind.toggle, value = 1.0))
+        if title == "Crop":
+            specs.append(ParameterSpec(name = "crop_tool", label = "Crop", kind = ParameterKind.button, join = true))
+            specs.append(ParameterSpec(name = "aspect", label = "Aspect", kind = ParameterKind.menu, resettable = false,
+                                       items = "Free=0|Original=-1|1:1=1|4:5=0.8|5:4=1.25|3:2=1.5|2:3=0.6667|16:9=1.7778"))
         if title == "View":
             specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
@@ -221,6 +230,10 @@ pub class DevelopControls:
             self.band = int(value)
             self.show_mixer(section)
             return
+        if name == "aspect":
+            if let tell = self.on_crop_aspect:
+                tell(value)
+            return
         if name.starts_with("mixer_"):
             self.look.set(f"{bands()[self.band]}_{name[6..]}", value)
         else:
@@ -239,6 +252,9 @@ pub class DevelopControls:
                 self.look.set("tint", 0.0)
             "draw_guides":
                 self.set_guiding(not self.guiding)
+                return
+            "crop_tool":
+                self.set_cropping(not self.cropping)
                 return
             "clear_guides":
                 self.look.set_guides([], [], [], [])
@@ -259,10 +275,37 @@ pub class DevelopControls:
         if let tell = self.on_change:
             tell()
 
-    ## Turn the guide tool on or off.
+    ## Turn the crop tool on or off (the guide tool off when it turns on).
+    pub func set_cropping(self, on: bool) -> unit!:
+        if on == self.cropping:
+            return
+        if on:
+            self.set_guiding(false)
+        self.cropping = on
+        var aspect = 0.0
+        for section in self.sections:
+            let at = section.row("crop_tool")
+            if at >= 0:
+                section.panel.set_label(at, "Done" if on else "Crop")
+                aspect = section.panel.value(section.row("aspect"))
+        if let tell = self.on_crop_tool:
+            tell(on, aspect)
+
+    ## The crop: left, top, right, bottom.
+    pub func crop_values(self) -> list[float]!:
+        return [self.look.get("crop_left"), self.look.get("crop_top"), self.look.get("crop_right"), self.look.get("crop_bottom")]
+
+    ## Take `edges` (left, top, right, bottom) as the crop.
+    pub func set_crop(self, edges: list[float]) -> unit!:
+        for (at, name) in ["crop_left", "crop_top", "crop_right", "crop_bottom"].indexed():
+            self.look.set(name, edges[at])
+
+    ## Turn the guide tool on or off (the crop tool off when it turns on).
     pub func set_guiding(self, on: bool) -> unit!:
         if on == self.guiding:
             return
+        if on:
+            self.set_cropping(false)
         self.guiding = on
         for section in self.sections:
             let at = section.row("draw_guides")
@@ -318,7 +361,7 @@ pub class DevelopControls:
         self.showing = true
         for section in self.sections:
             for (index, name) in section.names.indexed():
-                if name == section.title or name == "band" or name.starts_with("mixer_") or name in ["as_shot", "draw_guides", "clear_guides", "reset"]:
+                if name == section.title or name == "band" or name.starts_with("mixer_") or name in ["as_shot", "draw_guides", "clear_guides", "reset", "crop_tool", "aspect"]:
                     continue
                 var value = self.look.get(name)
                 # The white balance's default is the camera's: it shows as shot,

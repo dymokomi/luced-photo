@@ -65,6 +65,13 @@ pub class Panels:
         let controls = self.properties.develop
         controls.on_guide_tool = func (on: bool) -> unit!:
             self.viewer.set_guiding(on, controls.guide_points())
+        controls.on_crop_tool = func (on: bool, aspect: float) -> unit!:
+            self.viewer.set_cropping(on, controls.crop_values(), self.aspect_ratio(aspect))
+        controls.on_crop_aspect = func (aspect: float) -> unit!:
+            self.viewer.set_crop_aspect(self.aspect_ratio(aspect))
+        self.viewer.on_crop = func (edges: list[float]) -> unit!:
+            controls.set_crop(edges)
+            self.session.changed()
         controls.on_guides_cleared = func () -> unit!:
             if self.viewer.guiding:
                 self.viewer.set_guiding(true, [])
@@ -266,6 +273,7 @@ pub class Panels:
     ## Show the photo at `lead` (-1 none) in the viewer and Properties.
     pub func show_selection(self, lead: int) -> unit!:
         self.properties.develop.set_guiding(false)
+        self.properties.develop.set_cropping(false)
         let selected = self.library_pane.grid.selected_count()
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)
@@ -278,6 +286,13 @@ pub class Panels:
         let id = index.id(lead)
         self.session.open(id, index.settings(lead))
         self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), index.width(lead), index.height(lead))
+
+    ## An Aspect menu value as width over height: -1 is the photo's own, 0 free.
+    func aspect_ratio(self, value: float) -> float:
+        if value >= 0.0:
+            return value
+        let height = float(self.viewer.photo_height())
+        return float(self.viewer.photo_width()) / height if height > 0.0 else 0.0
 
     # mark: the develop =========================================================================
 

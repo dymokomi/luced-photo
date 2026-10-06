@@ -9,6 +9,11 @@
 ## dragging pans. Zoomed past what the viewer's develop holds, the photo loads
 ## again at full size in the background and swaps in.
 ##
+## The crop tool: while it is on, the whole corrected frame shows, the part the
+## crop leaves out dimmed, with thirds and handles over the crop. Drag a corner or
+## an edge to size it (a chosen aspect is kept), inside it to move it; `on_crop`
+## hears each change when the drag ends.
+##
 ## The guide tool: while it is on, the photo shows as it was taken (no
 ## perspective) with its guides over it. Drag on the photo to draw a guide (four
 ## at most), drag a guide's end to move it, right-click a guide to remove it;
@@ -67,6 +72,17 @@ pub class Viewer: Widget:
     var pan_x: float = 0.0
     var pan_y: float = 0.0
     var pressed_at: float = 0.0
+    ## The crop tool: on, the crop (left, top, right, bottom, 0..1 of the frame),
+    ## the aspect kept (width over height in pixels, 0 for none), and the part of
+    ## the crop being dragged (-1 none, 0–7 corners and edges, 8 the inside).
+    pub var cropping: bool = false
+    var crop: list[float] = []
+    var crop_aspect: float = 0.0
+    var crop_part: int = -1
+    var crop_from: list[float] = []
+    var crop_x: float = 0.0
+    var crop_y: float = 0.0
+    pub var on_crop: func(list[float]) -> unit!? = none
 
     pub func init(self) -> unit!:
         self.box = Layout()
@@ -122,6 +138,52 @@ pub class Viewer: Widget:
         self.box.set_cursor(Cursor.crosshair if on else Cursor.arrow)
         self.box.invalidate()
 
+    ## Turn the crop tool on or off, showing `crop` (left, top, right, bottom) and
+    ## keeping `aspect` (0 for none).
+    pub func set_cropping(self, on: bool, crop: list[float], aspect: float) -> unit!:
+        self.cropping = on
+        self.crop = crop
+        self.crop_aspect = aspect
+        self.crop_part = -1
+        self.developer.show_crop(not on)
+        self.box.set_cursor(Cursor.crosshair if on else Cursor.arrow)
+        if on and aspect > 0.0:
+            self.fit_aspect()
+            self.tell_crop()
+        self.box.invalidate()
+
+    ## Keep `aspect` from now on, fitting the crop to it about its middle.
+    pub func set_crop_aspect(self, aspect: float) -> unit!:
+        self.crop_aspect = aspect
+        if aspect > 0.0:
+            self.fit_aspect()
+            self.tell_crop()
+        self.box.invalidate()
+
+    ## The frame's width over its height, in pixels.
+    func frame_aspect(self) -> float:
+        let height = float(self.developer.height())
+        return float(self.developer.width()) / height if height > 0.0 else 1.5
+
+    ## The largest crop of the kept aspect inside the current one, about its middle.
+    func fit_aspect(self):
+        let frame = self.frame_aspect()
+        var width = self.crop[2] - self.crop[0]
+        var height = self.crop[3] - self.crop[1]
+        # In pixels the crop is width·W by height·H; keep width/height·frame = aspect.
+        let wanted = self.crop_aspect / frame
+        if width / height > wanted:
+            width = height * wanted
+        else:
+            height = width / wanted
+        let cx = (self.crop[0] + self.crop[2]) * 0.5
+        let cy = (self.crop[1] + self.crop[3]) * 0.5
+        self.crop = clamp_rect([cx - width * 0.5, cy - height * 0.5, cx + width * 0.5, cy + height * 0.5])
+
+    func tell_crop(self) -> unit!:
+        if let tell = self.on_crop:
+            tell(self.crop.copy())
+
     ## The size of the photo the develop shows, for solving guides: 0 before it loads.
     pub func photo_width(self) -> int:
         return self.developer.width()
@@ -166,11 +228,13 @@ pub class Viewer: Widget:
         self.pane = Size(size.width, size.height)
         painter.rectangle(Rect(0.0, 0.0, size.width, size.height), theme.viewer_backdrop())
         if self.developer.has_image():
-            let place = self.placement(float(self.developer.width()), float(self.developer.height()))
+            let place = self.placement(self.developer.output_width(), self.developer.output_height())
             self.drawn = place
             self.developer.draw(target, place.x, place.y, place.width, place.height)
             if self.guiding:
                 self.draw_guides(painter, place)
+            if self.cropping:
+                self.draw_crop(painter, place)
             self.ask_full(place)
             return
         let picture = self.picture else return
@@ -182,7 +246,9 @@ pub class Viewer: Widget:
     func placement(self, width: float, height: float) -> Rect:
         if self.zoom <= 0.0 or self.full_width <= 0.0:
             return fitted(self.pane.width, self.pane.height, width, height)
-        let shown_width = self.full_width * self.zoom
+        # The output's share of the photo's full size: all of it, or the crop's.
+        let share = width / float(self.developer.width()) if self.developer.has_image() and self.developer.width() > 0 else 1.0
+        let shown_width = self.full_width * self.zoom * share
         let shown_height = shown_width * height / width
         return Rect(self.pane.width * 0.5 - self.center_u * shown_width, self.pane.height * 0.5 - self.center_v * shown_height, shown_width, shown_height)
 
@@ -250,6 +316,96 @@ pub class Viewer: Widget:
         self.clamp_center()
         self.box.invalidate()
 
+    ## The crop over the frame: what it leaves out dimmed, its edge, thirds and handles.
+    func draw_crop(self, painter: Painter, place: Rect) -> unit!:
+        let left = place.x + self.crop[0] * place.width
+        let top = place.y + self.crop[1] * place.height
+        let right = place.x + self.crop[2] * place.width
+        let bottom = place.y + self.crop[3] * place.height
+        let shade = theme.backdrop()
+        painter.rectangle(Rect(place.x, place.y, place.width, top - place.y), shade, 0.6)
+        painter.rectangle(Rect(place.x, bottom, place.width, place.y + place.height - bottom), shade, 0.6)
+        painter.rectangle(Rect(place.x, top, left - place.x, bottom - top), shade, 0.6)
+        painter.rectangle(Rect(right, top, place.x + place.width - right, bottom - top), shade, 0.6)
+        let ink = theme.text()
+        for third in [1.0 / 3.0, 2.0 / 3.0]:
+            let x = left + (right - left) * third
+            let y = top + (bottom - top) * third
+            painter.rectangle(Rect(x, top, 1.0, bottom - top), ink, 0.35)
+            painter.rectangle(Rect(left, y, right - left, 1.0), ink, 0.35)
+        for (x, y, w, h) in [(left, top, right - left, 1.5), (left, bottom - 1.5, right - left, 1.5), (left, top, 1.5, bottom - top), (right - 1.5, top, 1.5, bottom - top)]:
+            painter.rectangle(Rect(x, y, w, h), ink)
+        for (x, y) in self.handle_points(left, top, right, bottom):
+            painter.rectangle(Rect(x - 4.0, y - 4.0, 8.0, 8.0), theme.accent())
+
+    ## The handles: four corners, then the middles of the top, right, bottom and left edges.
+    func handle_points(self, left: float, top: float, right: float, bottom: float) -> list[(float, float)]:
+        let cx = (left + right) * 0.5
+        let cy = (top + bottom) * 0.5
+        return [(left, top), (right, top), (right, bottom), (left, bottom), (cx, top), (right, cy), (cx, bottom), (left, cy)]
+
+    ## The crop part at (`x`, `y`): a handle 0–7, 8 inside, -1 outside.
+    func crop_part_at(self, x: float, y: float) -> int:
+        let place = self.drawn
+        let left = place.x + self.crop[0] * place.width
+        let top = place.y + self.crop[1] * place.height
+        let right = place.x + self.crop[2] * place.width
+        let bottom = place.y + self.crop[3] * place.height
+        for (at, point) in self.handle_points(left, top, right, bottom).indexed():
+            if math.abs(point.0 - x) <= 10.0 and math.abs(point.1 - y) <= 10.0:
+                return at
+        if x > left and x < right and y > top and y < bottom:
+            return 8
+        return -1
+
+    ## Drag the crop's part to the photo point (`u`, `v`), from where it started.
+    func drag_crop(self, u: float, v: float) -> unit!:
+        let start = self.crop_from
+        if self.crop_part == 8:
+            let (du, dv) = (u - self.crop_x, v - self.crop_y)
+            let width = start[2] - start[0]
+            let height = start[3] - start[1]
+            let left = math.max(0.0, math.min(1.0 - width, start[0] + du))
+            let top = math.max(0.0, math.min(1.0 - height, start[1] + dv))
+            self.crop = [left, top, left + width, top + height]
+            return
+        var edges = start.copy()
+        let moves_left = self.crop_part in [0, 3, 7]
+        let moves_right = self.crop_part in [1, 2, 5]
+        let moves_top = self.crop_part in [0, 1, 4]
+        let moves_bottom = self.crop_part in [2, 3, 6]
+        if moves_left:
+            edges[0] = math.min(u, edges[2] - 0.02)
+        if moves_right:
+            edges[2] = math.max(u, edges[0] + 0.02)
+        if moves_top:
+            edges[1] = math.min(v, edges[3] - 0.02)
+        if moves_bottom:
+            edges[3] = math.max(v, edges[1] + 0.02)
+        if self.crop_aspect > 0.0:
+            # Keep the aspect: the dragged side leads, the other follows from the
+            # opposite corner (or the middle, for an edge).
+            let wanted = self.crop_aspect / self.frame_aspect()
+            let width = edges[2] - edges[0]
+            let height = edges[3] - edges[1]
+            if (moves_left or moves_right) and not (moves_top or moves_bottom):
+                let grown = width / wanted
+                let cy = (start[1] + start[3]) * 0.5
+                edges[1] = cy - grown * 0.5
+                edges[3] = cy + grown * 0.5
+            elif (moves_top or moves_bottom) and not (moves_left or moves_right):
+                let grown = height * wanted
+                let cx = (start[0] + start[2]) * 0.5
+                edges[0] = cx - grown * 0.5
+                edges[2] = cx + grown * 0.5
+            else:
+                let grown_height = width / wanted
+                if moves_top:
+                    edges[1] = edges[3] - grown_height
+                else:
+                    edges[3] = edges[1] + grown_height
+        self.crop = clamp_rect(edges)
+
     func draw_guides(self, painter: Painter, place: Rect) -> unit!:
         var at = 0
         while at + 3 < self.guides.length:
@@ -291,6 +447,23 @@ pub class Viewer: Widget:
             at += 4
         return -1
 
+    func crop_event(self, event: Event) -> unit!:
+        if event.kind == EventKind.pointer_down and event.inside and event.button == 0:
+            self.crop_part = self.crop_part_at(event.x, event.y)
+            if self.crop_part < 0:
+                return
+            self.crop_from = self.crop.copy()
+            let (u, v) = self.on_photo(event.x, event.y)
+            self.crop_x = u
+            self.crop_y = v
+        elif event.kind == EventKind.pointer_moved and self.crop_part >= 0:
+            let (u, v) = self.on_photo(event.x, event.y)
+            self.drag_crop(u, v)
+            self.box.invalidate()
+        elif event.kind == EventKind.pointer_up and self.crop_part >= 0:
+            self.crop_part = -1
+            self.tell_crop()
+
     func on_photo(self, x: float, y: float) -> (float, float):
         return (math.max(0.0, math.min(1.0, (x - self.drawn.x) / self.drawn.width)), math.max(0.0, math.min(1.0, (y - self.drawn.y) / self.drawn.height)))
 
@@ -319,6 +492,9 @@ pub class Viewer: Widget:
                 self.panning = false
                 self.box.set_cursor(Cursor.crosshair if self.guiding else Cursor.arrow)
             return
+        if event.kind == EventKind.pointer_down and event.inside and event.button == 0 and self.cropping and self.crop_part_at(event.x, event.y) >= 0:
+            self.crop_event(event)
+            return
         if event.kind == EventKind.pointer_down and event.inside and (event.button == 2 or (event.button == 0 and not self.guiding)):
             let now = clock.timestamp()
             if event.button == 0 and now - self.pressed_at < 0.35:
@@ -331,6 +507,9 @@ pub class Viewer: Widget:
                 self.pan_x = event.x
                 self.pan_y = event.y
                 self.box.set_cursor(Cursor.grab)
+            return
+        if self.cropping:
+            self.crop_event(event)
             return
         if not self.guiding:
             return
@@ -378,6 +557,14 @@ pub class Viewer: Widget:
     pub func close(self):
         self.loader.close()
         self.developer.close()
+
+## `edges` (left, top, right, bottom) kept inside the frame, keeping their size.
+func clamp_rect(edges: list[float]) -> list[float]:
+    let width = math.min(1.0, edges[2] - edges[0])
+    let height = math.min(1.0, edges[3] - edges[1])
+    let left = math.max(0.0, math.min(1.0 - width, edges[0]))
+    let top = math.max(0.0, math.min(1.0 - height, edges[1]))
+    return [left, top, left + width, top + height]
 
 ## A `width` × `height` picture fitted, centred, into a `room_width` ×
 ## `room_height` pane with a margin; never larger than 1:1 in points.

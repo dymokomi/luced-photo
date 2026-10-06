@@ -16,6 +16,7 @@ pub func main(arguments: list[str]) -> int!:
     let zoomed = arguments.length > 5 and arguments[5] == "zoom"
     let exporting = arguments.length > 6 and arguments[5] == "export"
     let undoing = arguments.length > 5 and arguments[5] == "undo"
+    let cropping = arguments.length > 5 and arguments[5] == "crop"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -33,6 +34,8 @@ pub func main(arguments: list[str]) -> int!:
             photo.panels.properties.develop.set_all_open(true)
         if ticks == 6 and color_sections:
             photo.panels.properties.develop.open_only(["Color Mixer", "Color Grading", "Black & White"])
+        if ticks == 30 and cropping:
+            photo.panels.properties.develop.set_cropping(true)
         if ticks == 40 and undoing:
             photo.panels.session.undo()
         if ticks == 10 and exporting:
