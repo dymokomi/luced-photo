@@ -11,6 +11,10 @@ from photo_library import PhotoLibrary
 from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
+from luce_develop.settings import Settings, parse, encode
+
+## Ticks (of 0.05 s) a develop change waits for more before it is saved.
+let save_ticks: int = 10
 
 ## How often the grid reloads the catalog while an import adds photos, in ticks.
 let reload_ticks: int = 20
@@ -26,6 +30,12 @@ pub class Panels:
     let status: Text
     let palette: CommandPalette
     var connections: list[Connection] = []
+    ## The photo whose develop changed and is not saved yet (-1 none), and ticks
+    ## since its last change.
+    var unsaved: int = -1
+    var unsaved_ticks: int = 0
+    ## The photo the develop controls show.
+    var developing: int = -1
     ## Ticks since the import last added photos the grid has not shown, or -1.
     var unshown: int = -1
     pub var app: Application? = none
@@ -39,6 +49,10 @@ pub class Panels:
         self.status = Text("", font = font, muted = true)
         self.palette = CommandPalette(self.actions.all, font = font)
         self.library_pane.on_pick = self.show_selection
+        self.properties.develop.on_change = self.develop_changed
+        self.viewer.on_developed = func (temperature: float, tint: float) -> unit!:
+            let controls = self.properties.develop
+            controls.show(controls.settings, temperature, tint)
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
@@ -167,14 +181,42 @@ pub class Panels:
 
     ## Show the photo at `lead` (-1 none) in the viewer and Properties.
     pub func show_selection(self, lead: int) -> unit!:
+        self.save_develop()
         let selected = self.library_pane.grid.selected_count()
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)
         if lead < 0:
+            self.developing = -1
             self.viewer.clear()
             return
-        let id = self.library.index.id(lead)
-        self.viewer.show(id, self.library.preview_path(id))
+        let index = self.library.index
+        let id = index.id(lead)
+        let settings = parse(index.settings(lead))
+        self.developing = id
+        self.properties.develop.show(settings, 5500.0, 0.0)
+        self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), settings)
+
+    # mark: the develop =========================================================================
+
+    func develop_changed(self, settings: Settings) -> unit!:
+        self.viewer.set_settings(settings)
+        if self.developing >= 0:
+            self.unsaved = self.developing
+            self.unsaved_ticks = 0
+
+    ## Store the develop of the photo it was made for, if it has changed.
+    func save_develop(self) -> unit!:
+        if self.unsaved < 0:
+            return
+        let id = self.unsaved
+        self.unsaved = -1
+        let text = encode(self.properties.develop.settings)
+        self.library.save_settings(id, text) catch failure:
+            self.tell(f"The develop was not saved: {failure.message}")
+            return
+        let at = self.library.index.position_of(id)
+        if at >= 0:
+            self.library_pane.refresh_badges([at])
 
     ## Move the lead `direction` photos on, selecting it alone.
     func step(self, direction: int) -> unit!:
@@ -205,11 +247,17 @@ pub class Panels:
         self.library_pane.tick()
         self.viewer.tick()
         self.take_import_events()
+        if self.unsaved >= 0:
+            self.unsaved_ticks += 1
+            if self.unsaved_ticks >= save_ticks:
+                self.save_develop()
 
     pub func tell(self, text: str) -> unit!:
         self.status.set_text(text)
 
     pub func close(self):
+        self.save_develop() catch failure:
+            _ = failure
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()

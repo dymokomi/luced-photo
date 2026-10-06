@@ -1,0 +1,135 @@
+## The develop's controls in the Properties pane: White Balance, Exposure & Tone,
+## Color and View, each a titled run of sliders over luce-develop's settings.
+## Moving any slider calls `on_change` with the whole new settings; `show` puts a
+## photo's settings on the sliders without calling it.
+from luce_ui.ui import VStack, HStack, Text, Slider, Font, Rule, Widget, Menu, Command, Button
+from interop import Connection
+from luce_develop.settings import Settings, defaults
+
+pub class DevelopControls:
+    pub let body: VStack
+    let temperature: Slider
+    let tint: Slider
+    let exposure: Slider
+    let contrast: Slider
+    let highlights: Slider
+    let shadows: Slider
+    let whites: Slider
+    let blacks: Slider
+    let vibrance: Slider
+    let saturation: Slider
+    let view_name: Text
+    let views: list[Command]
+    var connections: list[Connection] = []
+    ## The settings on the sliders.
+    pub var settings: Settings
+    ## The photo's as-shot white balance, which temperature 0 means.
+    var shot_temperature: float = 5500.0
+    var shot_tint: float = 0.0
+    ## While `show` moves the sliders, their changes are not the user's.
+    var showing: bool = false
+    pub var on_change: func(Settings) -> unit!? = none
+
+    pub func init(self, font: Font) -> unit!:
+        self.settings = defaults()
+        self.temperature = self.slider("Temperature", 2000.0, 12000.0, 5500.0, 0, font, func (value: float) -> unit!:
+            self.settings.temperature = value
+            # Leaving as-shot keeps its tint until the tint slider moves.
+            if self.settings.tint == 0.0:
+                self.settings.tint = self.shot_tint)
+        self.tint = self.slider("Tint", -150.0, 150.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.tint = value
+            if self.settings.temperature == 0.0:
+                self.settings.temperature = self.shot_temperature)
+        self.exposure = self.slider("Exposure", -5.0, 5.0, 0.0, 2, font, func (value: float) -> unit!:
+            self.settings.exposure = value)
+        self.contrast = self.slider("Contrast", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.contrast = value)
+        self.highlights = self.slider("Highlights", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.highlights = value)
+        self.shadows = self.slider("Shadows", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.shadows = value)
+        self.whites = self.slider("Whites", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.whites = value)
+        self.blacks = self.slider("Blacks", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.blacks = value)
+        self.vibrance = self.slider("Vibrance", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.vibrance = value)
+        self.saturation = self.slider("Saturation", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
+            self.settings.saturation = value)
+        self.view_name = Text("Standard", font = font, muted = true)
+        self.views = [Command("Standard", id = "view_standard"), Command("Linear", id = "view_linear")]
+        for (at, command) in self.views.indexed():
+            let chosen = [1, 2][at]
+            self.connections.append(command.on_trigger(func () -> unit!:
+                self.settings.view = chosen
+                self.view_name.set_text(view_title(chosen))
+                self.changed()))
+        let as_shot = Button("As Shot", font = font)
+        self.connections.append(as_shot.on_click(func () -> unit!:
+            self.settings.temperature = 0.0
+            self.settings.tint = 0.0
+            self.show_balance()
+            self.changed()))
+        let reset = Button("Reset All", font = font)
+        self.connections.append(reset.on_click(func () -> unit!:
+            self.show(defaults(), self.shot_temperature, self.shot_tint)
+            self.changed()))
+        let rows: list[Widget] = [
+            title("WHITE BALANCE", font), self.temperature, self.tint, HStack([as_shot], spacing = 4.0), Rule(),
+            title("EXPOSURE & TONE", font), self.exposure, self.contrast, self.highlights, self.shadows, self.whites, self.blacks, Rule(),
+            title("COLOR", font), self.vibrance, self.saturation, Rule(),
+            title("VIEW", font), HStack([Menu("Transform", self.views, font = font), self.view_name], spacing = 6.0),
+            HStack([reset], spacing = 4.0)]
+        self.body = VStack(rows, spacing = 6.0)
+
+    ## A slider whose moves `apply` takes into the settings, then reports.
+    func slider(self, text: str, low: float, high: float, value: float, decimals: int, font: Font, apply: func(float) -> unit!) -> Slider!:
+        let made = Slider(text, low, high, value, decimals = decimals, font = font)
+        self.connections.append(made.on_change(func (moved: float) -> unit!:
+            if not self.showing:
+                apply(moved)
+                self.changed()))
+        return made
+
+    func changed(self) -> unit!:
+        if let tell = self.on_change:
+            tell(self.settings)
+
+    ## Put `settings` on the sliders; `shot_temperature` and `shot_tint` are the
+    ## photo's as-shot balance, shown while the settings keep it.
+    pub func show(self, settings: Settings, shot_temperature: float, shot_tint: float) -> unit!:
+        self.showing = true
+        self.settings = settings
+        self.shot_temperature = shot_temperature
+        self.shot_tint = shot_tint
+        self.show_balance()
+        self.exposure.set_value(settings.exposure)
+        self.contrast.set_value(settings.contrast)
+        self.highlights.set_value(settings.highlights)
+        self.shadows.set_value(settings.shadows)
+        self.whites.set_value(settings.whites)
+        self.blacks.set_value(settings.blacks)
+        self.vibrance.set_value(settings.vibrance)
+        self.saturation.set_value(settings.saturation)
+        self.view_name.set_text(view_title(settings.view))
+        self.showing = false
+
+    func show_balance(self) -> unit!:
+        let was = self.showing
+        self.showing = true
+        let as_shot = self.settings.temperature == 0.0
+        self.temperature.set_value(self.shot_temperature if as_shot else self.settings.temperature)
+        self.tint.set_value(self.shot_tint if as_shot else self.settings.tint)
+        self.showing = was
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
+
+func title(text: str, font: Font) -> Text!:
+    return Text(text, font = font, muted = true)
+
+func view_title(view: int) -> str:
+    return ["ACES 2.0", "Standard", "Linear"][view]

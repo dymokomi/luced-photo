@@ -1,14 +1,15 @@
-## The Properties pane: one long column about the selected photo. For now it
-## holds what the camera recorded and the photo's marks (stars, flag, label);
-## the develop's sections (white balance, tone, curves, color…) join it as
-## luce-develop grows. Every control acts on the whole selection.
+## The Properties pane: one long column about the selected photo: its develop
+## (develop_controls.luc), what the camera recorded, and its marks (stars, flag,
+## label). Marks act on the whole selection; the develop on the lead photo.
 from luce_ui.ui import VStack, HStack, Text, Button, Font, Panel, Size, ScrollView, Spacer, Rule, Command, Widget
 from interop import Connection
 from photo_library import PhotoLibrary
 from actions import Actions
+from develop_controls import DevelopControls
 
 pub class PropertiesPane:
     pub let panel: Panel
+    pub let develop: DevelopControls
     let library: PhotoLibrary
     let title: Text
     let camera: Text
@@ -28,6 +29,7 @@ pub class PropertiesPane:
         self.captured = Text("", font = font, muted = true)
         self.file = Text("", font = font, muted = true)
         self.marks = Text("", font = font)
+        self.develop = DevelopControls(font)
         var stars: list[Widget] = []
         for command in actions.ratings:
             stars.append(self.command_button(command, "0" if stars.length == 0 else f"{stars.length}★", font))
@@ -36,7 +38,7 @@ pub class PropertiesPane:
         var labels: list[Widget] = []
         for (at, command) in actions.labels.indexed():
             labels.append(self.command_button(command, ["Red", "Yellow", "Green", "Blue", "None"][at], font))
-        let rows = VStack([self.title, self.captured, Rule(), Text("CAMERA", font = font, muted = true), self.camera, self.lens,
+        let rows = VStack([self.title, self.captured, Rule(), self.develop.body, Rule(), Text("CAMERA", font = font, muted = true), self.camera, self.lens,
                            self.exposure, self.file, Rule(), Text("MARKS", font = font, muted = true), self.marks,
                            HStack(stars, spacing = 4.0), flags, HStack(labels, spacing = 4.0), Spacer()], spacing = 6.0, padding = 10.0)
         self.panel = Panel("Properties", ScrollView(rows), minimum = Size(260.0, 200.0), closable = false, id = "properties")
@@ -84,6 +86,7 @@ pub class PropertiesPane:
         self.marks.set_text(f"{stars}  {flag}".trim())
 
     pub func close(self):
+        self.develop.close()
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()

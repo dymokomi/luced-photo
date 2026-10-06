@@ -1,23 +1,33 @@
-## The Viewer: the current photo, fitted to the pane on a dark backdrop. It shows
-## the library's 2048 px preview, decoded off the window's thread; the develop
-## pipeline takes over here once photos are developed (luce-develop's renderer).
+## The Viewer: the current photo, fitted to the pane on a dark backdrop. The
+## library's 2048 px preview shows at once; the photo then loads into the develop
+## renderer (luce-develop), which draws it with its settings every frame, so
+## every slider shows as it moves.
 from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image, Panel
 from luce_gpu.gpu import RenderTarget, Rect
 from luce_window.input import Cursor
 from luce_std import math
+from luce_develop.renderer import Renderer
+from luce_develop import renderer
+from luce_develop.settings import Settings
 from thumbs import Loader
 import thumbs
 import library
 import theme
 
+## The longer side the develop loads a photo at, in pixels.
+let develop_edge: int = 2560
+
 pub class Viewer: Widget:
     let box: Layout
     let loader: Loader
+    let developer: Renderer
     pub let panel: Panel
     var picture: Image? = none
     ## The photo shown, and the one on its way (ids; -1 for none).
     var shown: int = -1
     var wanted: int = -1
+    ## Called when a photo's develop is ready, with its as-shot white balance.
+    pub var on_developed: func(float, float) -> unit!? = none
 
     pub func init(self) -> unit!:
         self.box = Layout()
@@ -25,35 +35,50 @@ pub class Viewer: Widget:
         self.box.set_flex()
         self.box.set_limits(Size(240.0, 200.0), Size(16384.0, 16384.0))
         self.loader = thumbs.start(1, library.preview_edge)
+        self.developer = renderer.start()
         self.panel = Panel("Viewer", self, minimum = Size(320.0, 240.0), closable = false, id = "viewer")
 
-    ## Show photo `id` from its preview file at `path`.
-    pub func show(self, id: int, path: str) -> unit!:
+    ## Show photo `id`: its preview from `preview` at once, then the original at
+    ## `original` developed with `settings`.
+    pub func show(self, id: int, preview: str, original: str, settings: Settings) -> unit!:
+        self.developer.set_settings(settings)
         if id == self.shown or id == self.wanted:
+            self.box.invalidate()
             return
         self.wanted = id
         self.loader.clear()
-        self.loader.request(id, path)
+        self.loader.request(id, preview)
+        self.developer.clear()
+        self.developer.open(original, develop_edge)
+
+    ## Develop with `settings` from the next frame on.
+    pub func set_settings(self, settings: Settings) -> unit!:
+        self.developer.set_settings(settings)
+        self.box.invalidate()
 
     ## Show nothing.
     pub func clear(self) -> unit!:
         self.loader.clear()
+        self.developer.clear()
         self.wanted = -1
         self.shown = -1
         self.picture = none
         self.box.invalidate()
 
-    ## Take in a finished preview; called on the window's timer.
+    ## Take in a finished preview or develop; called on the window's timer.
     pub func tick(self) -> unit!:
         let id = self.loader.take()
-        if id < 0 or id != self.wanted:
-            return
-        let picture = Image(self.loader.taken_width(), self.loader.taken_height())
-        picture.write(self.loader.taken_pixels())
-        self.picture = picture
-        self.shown = id
-        self.wanted = -1
-        self.box.invalidate()
+        if id >= 0 and id == self.wanted:
+            let picture = Image(self.loader.taken_width(), self.loader.taken_height())
+            picture.write(self.loader.taken_pixels())
+            self.picture = picture
+            self.shown = id
+            self.wanted = -1
+            self.box.invalidate()
+        if self.developer.poll():
+            if let tell = self.on_developed:
+                tell(self.developer.shot_temperature(), self.developer.shot_tint())
+            self.box.invalidate()
 
     pub func layout(self) -> Layout:
         return self.box
@@ -65,22 +90,31 @@ pub class Viewer: Widget:
         let painter = Painter(target)
         let size = target.size()
         painter.rectangle(Rect(0.0, 0.0, size.width, size.height), theme.viewer_backdrop())
-        let picture = self.picture else return
-        let margin = 16.0
-        let room_width = size.width - margin * 2.0
-        let room_height = size.height - margin * 2.0
-        if room_width <= 0.0 or room_height <= 0.0:
+        let developed = self.developer.has_image()
+        let width = float(self.developer.width()) if developed else 0.0
+        let height = float(self.developer.height()) if developed else 0.0
+        if developed:
+            let place = fitted(size.width, size.height, width, height)
+            self.developer.draw(target, place.x, place.y, place.width, place.height)
             return
-        let width = float(picture.width())
-        let height = float(picture.height())
-        # Never past 1:1 of the preview; fitted otherwise.
-        let scale = math.min(1.0, math.min(room_width / width, room_height / height))
-        let shown_width = width * scale
-        let shown_height = height * scale
-        painter.image(picture, Rect((size.width - shown_width) * 0.5, (size.height - shown_height) * 0.5, shown_width, shown_height))
+        let picture = self.picture else return
+        let place = fitted(size.width, size.height, float(picture.width()), float(picture.height()))
+        painter.image(picture, place)
 
     pub func event(self, event: Event) -> unit!:
         return
 
     pub func close(self):
         self.loader.close()
+        self.developer.close()
+
+## A `width` × `height` picture fitted, centred, into a `room_width` ×
+## `room_height` pane with a margin; never larger than 1:1 in points.
+func fitted(room_width: float, room_height: float, width: float, height: float) -> Rect:
+    let margin = 16.0
+    let free_width = room_width - margin * 2.0
+    let free_height = room_height - margin * 2.0
+    if free_width <= 0.0 or free_height <= 0.0 or width <= 0.0 or height <= 0.0:
+        return Rect(0.0, 0.0, 0.0, 0.0)
+    let scale = math.min(1.0, math.min(free_width / width, free_height / height))
+    return Rect((room_width - width * scale) * 0.5, (room_height - height * scale) * 0.5, width * scale, height * scale)

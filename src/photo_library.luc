@@ -108,6 +108,13 @@ pub class PhotoLibrary:
                 _:
                     self.index.set_label(at, value)
 
+    ## Store photo `id`'s develop settings (text form) in the catalog and the index.
+    pub func save_settings(self, id: int, text: str) -> unit!:
+        photo_index.save_settings(self.store, id, text)
+        let at = self.index.position_of(id)
+        if at >= 0:
+            self.index.set_settings(at, text)
+
     pub func close(self):
         if let current = self.running:
             current.close()

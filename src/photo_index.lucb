@@ -89,6 +89,9 @@ pub struct PhotoIndex:
         return self.photo(at).label
     pub func edited(at: i64) -> bool:
         return self.photo(at).edited
+    ## The develop settings' text form ("" when untouched).
+    pub func settings(at: i64) -> str:
+        return self.photo(at).settings
 
     ## The position of photo `id` under the filter, or -1.
     pub func position_of(id: i64) -> i64:
@@ -103,6 +106,10 @@ pub struct PhotoIndex:
         self.stored(at).flag = flag
     pub func set_label(at: i64, label: i64):
         self.stored(at).label = label
+    pub func set_settings(at: i64, settings: str) -> !:
+        let kept = try self.rows.pool.keep_text(settings.bytes)
+        self.stored(at).settings = kept
+        self.stored(at).edited = kept.length > 0
 
     ## Show only photos with at least `minimum_rating` stars, the flags `flags`
     ## selects (0 every photo, 1 picked, -1 rejected, 2 all but rejected) and label
@@ -189,6 +196,14 @@ pub func set_marks(store: interop.Reference[prism.Store], ids: const i64[], name
     defer batch.close()
     for id in ids:
         try batch.set_mark(id, name, value)
+    try batch.commit()
+
+## Store photo `id`'s develop settings (their text form) in the catalog.
+pub func save_settings(store: interop.Reference[prism.Store], id: i64, settings: str) -> !:
+    let held = try store.get()
+    var batch = try catalog.Batch.begin(held)
+    defer batch.close()
+    try batch.set_settings(id, settings)
     try batch.commit()
 
 test "photos sort by capture time, then id":
