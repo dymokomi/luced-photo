@@ -78,7 +78,7 @@ pub class Panels:
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
                               Menu("Library", [actions.import_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
-                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next], font = font),
+                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom], font = font),
                               Menu("Window", [actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
         self.dock = DStack([self.viewer.panel], font = font)
         self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.left)
@@ -127,6 +127,8 @@ pub class Panels:
             self.step(1)))
         self.connections.append(actions.previous.on_trigger(func () -> unit!:
             self.step(-1)))
+        self.connections.append(actions.zoom.on_trigger(func () -> unit!:
+            self.viewer.toggle_zoom()))
         self.connections.append(actions.palette.on_trigger(func () -> unit!:
             self.palette.open()))
         self.connections.append(actions.quit.on_trigger(func () -> unit!:
@@ -216,7 +218,7 @@ pub class Panels:
         self.developing = id
         self.properties.develop.show(index.settings(lead), 5500.0, 0.0)
         self.viewer.set_look(self.properties.develop.look)
-        self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead))
+        self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), index.width(lead), index.height(lead))
 
     # mark: the develop =========================================================================
 

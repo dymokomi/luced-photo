@@ -3,6 +3,12 @@
 ## renderer (luce-develop), which draws it with its settings every frame, so
 ## every slider shows as it moves.
 ##
+## Zoom: the photo fits the pane until zoomed. Z (the Zoom command) or a
+## double-click toggles 1:1, one photo pixel to one screen pixel, about the
+## pointer; command-scroll or a pinch zooms about the pointer; scrolling or
+## dragging pans. Zoomed past what the viewer's develop holds, the photo loads
+## again at full size in the background and swaps in.
+##
 ## The guide tool: while it is on, the photo shows as it was taken (no
 ## perspective) with its guides over it. Drag on the photo to draw a guide (four
 ## at most), drag a guide's end to move it, right-click a guide to remove it;
@@ -11,6 +17,7 @@ from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image,
 from luce_gpu.gpu import RenderTarget, Rect
 from luce_window.input import Cursor, EventKind
 from luce_std import math
+from luce_std import clock
 from luce_develop.renderer import Renderer
 from luce_develop import renderer
 from luce_develop.settings import Look
@@ -42,6 +49,24 @@ pub class Viewer: Widget:
     var drawn: Rect = Rect(0.0, 0.0, 0.0, 0.0)
     ## Called with the guides after every change the user makes.
     pub var on_guides: func(list[float]) -> unit!? = none
+    ## Zoom: 0 to fit, else points per pixel of the full-size photo, and the photo
+    ## point (0..1) at the pane's middle.
+    var zoom: float = 0.0
+    var center_u: float = 0.5
+    var center_v: float = 0.5
+    ## The photo's file and full size, and whether its full-size develop is on its way.
+    var original: str = ""
+    var full_width: float = 0.0
+    var full_height: float = 0.0
+    var full_asked: bool = false
+    ## Backing pixels per point and the pane's size, from the last draw.
+    var backing: float = 1.0
+    var pane: Size = Size(0.0, 0.0)
+    ## A drag panning the photo, from (`pan_x`, `pan_y`); the last press, for double-clicks.
+    var panning: bool = false
+    var pan_x: float = 0.0
+    var pan_y: float = 0.0
+    var pressed_at: float = 0.0
 
     pub func init(self) -> unit!:
         self.box = Layout()
@@ -52,13 +77,21 @@ pub class Viewer: Widget:
         self.developer = renderer.start()
         self.panel = Panel("Viewer", self, minimum = Size(320.0, 240.0), closable = false, id = "viewer")
 
-    ## Show photo `id`: its preview from `preview` at once, then the original at
-    ## `original`, developed with the look set by `set_look`.
-    pub func show(self, id: int, preview: str, original: str) -> unit!:
+    ## Show photo `id`, `full_width` × `full_height` pixels at full size: its
+    ## preview from `preview` at once, then the original at `original`, developed
+    ## with the look set by `set_look`.
+    pub func show(self, id: int, preview: str, original: str, full_width: int, full_height: int) -> unit!:
         if id == self.shown or id == self.wanted:
             self.box.invalidate()
             return
         self.wanted = id
+        self.original = original
+        self.full_width = float(full_width)
+        self.full_height = float(full_height)
+        self.full_asked = false
+        self.zoom = 0.0
+        self.center_u = 0.5
+        self.center_v = 0.5
         self.loader.clear()
         self.loader.request(id, preview)
         self.developer.clear()
@@ -129,20 +162,93 @@ pub class Viewer: Widget:
     pub func draw(self, target: RenderTarget) -> unit!:
         let painter = Painter(target)
         let size = target.size()
+        self.backing = size.pixel_width / size.width if size.width > 0.0 else 1.0
+        self.pane = Size(size.width, size.height)
         painter.rectangle(Rect(0.0, 0.0, size.width, size.height), theme.viewer_backdrop())
-        let developed = self.developer.has_image()
-        let width = float(self.developer.width()) if developed else 0.0
-        let height = float(self.developer.height()) if developed else 0.0
-        if developed:
-            let place = fitted(size.width, size.height, width, height)
+        if self.developer.has_image():
+            let place = self.placement(float(self.developer.width()), float(self.developer.height()))
             self.drawn = place
             self.developer.draw(target, place.x, place.y, place.width, place.height)
             if self.guiding:
                 self.draw_guides(painter, place)
+            self.ask_full(place)
             return
         let picture = self.picture else return
-        let place = fitted(size.width, size.height, float(picture.width()), float(picture.height()))
+        let place = self.placement(float(picture.width()), float(picture.height()))
         painter.image(picture, place)
+
+    ## Where a `width` × `height` picture of the photo goes in the pane: fitted,
+    ## or at the zoom about the center point.
+    func placement(self, width: float, height: float) -> Rect:
+        if self.zoom <= 0.0 or self.full_width <= 0.0:
+            return fitted(self.pane.width, self.pane.height, width, height)
+        let shown_width = self.full_width * self.zoom
+        let shown_height = shown_width * height / width
+        return Rect(self.pane.width * 0.5 - self.center_u * shown_width, self.pane.height * 0.5 - self.center_v * shown_height, shown_width, shown_height)
+
+    ## Load the full-size develop once the zoom shows more pixels than the
+    ## viewer's develop has.
+    func ask_full(self, place: Rect) -> unit!:
+        if self.full_asked or self.original == "":
+            return
+        if place.width * self.backing > float(self.developer.width()) * 1.05:
+            self.full_asked = true
+            self.developer.open(self.original, 0)
+
+    ## Points per full-size pixel when fitted.
+    func fit_zoom(self) -> float:
+        if self.full_width <= 0.0 or self.pane.width <= 0.0:
+            return 1.0
+        return fitted(self.pane.width, self.pane.height, self.full_width, self.full_height).width / self.full_width
+
+    ## Zoom to `zoom` (points per full-size pixel; 0 or less than the fit fits),
+    ## keeping the photo point under (`x`, `y`) where it is.
+    func zoom_to(self, zoom: float, x: float, y: float) -> unit!:
+        let fit = self.fit_zoom()
+        let wanted = math.min(zoom, 16.0 / self.backing)
+        if wanted <= fit * 1.001:
+            self.zoom = 0.0
+            self.center_u = 0.5
+            self.center_v = 0.5
+            self.box.invalidate()
+            return
+        let before = self.drawn
+        let u = (x - before.x) / before.width if before.width > 0.0 else 0.5
+        let v = (y - before.y) / before.height if before.height > 0.0 else 0.5
+        self.zoom = wanted
+        # The photo point (u, v) stays under (x, y): the center moves to match.
+        let width = self.full_width * wanted
+        let height = width * before.height / before.width if before.width > 0.0 else width
+        self.center_u = u - (x - self.pane.width * 0.5) / width
+        self.center_v = v - (y - self.pane.height * 0.5) / height
+        self.clamp_center()
+        self.box.invalidate()
+
+    ## Keep the photo over the pane: no empty margin while it is larger than the pane.
+    func clamp_center(self):
+        if self.zoom <= 0.0 or self.full_width <= 0.0:
+            return
+        let width = self.full_width * self.zoom
+        let height = self.full_height * self.zoom
+        let half_u = self.pane.width * 0.5 / width
+        let half_v = self.pane.height * 0.5 / height
+        self.center_u = math.max(half_u, math.min(1.0 - half_u, self.center_u)) if half_u < 0.5 else 0.5
+        self.center_v = math.max(half_v, math.min(1.0 - half_v, self.center_v)) if half_v < 0.5 else 0.5
+
+    ## Toggle between fitting the pane and 1:1, about (`x`, `y`) (the middle when negative).
+    pub func toggle_zoom(self, x: float = -1.0, y: float = -1.0) -> unit!:
+        let px = x if x >= 0.0 else self.pane.width * 0.5
+        let py = y if y >= 0.0 else self.pane.height * 0.5
+        self.zoom_to(0.0 if self.zoom > 0.0 else 1.0 / self.backing, px, py)
+
+    ## Move the photo by (`dx`, `dy`) points.
+    func pan_by(self, dx: float, dy: float):
+        if self.zoom <= 0.0:
+            return
+        self.center_u -= dx / (self.full_width * self.zoom)
+        self.center_v -= dy / (self.full_height * self.zoom)
+        self.clamp_center()
+        self.box.invalidate()
 
     func draw_guides(self, painter: Painter, place: Rect) -> unit!:
         var at = 0
@@ -193,7 +299,40 @@ pub class Viewer: Widget:
             tell(self.guides.copy())
 
     pub func event(self, event: Event) -> unit!:
-        if not self.guiding or self.drawn.width <= 0.0:
+        if self.drawn.width <= 0.0:
+            return
+        if event.kind == EventKind.magnify:
+            self.zoom_to(math.max(self.zoom, self.fit_zoom()) * (1.0 + event.scroll_y), event.x, event.y)
+            return
+        if event.kind == EventKind.scroll:
+            if event.meta or event.control:
+                self.zoom_to(math.max(self.zoom, self.fit_zoom()) * math.pow(1.1, event.scroll_y), event.x, event.y)
+            else:
+                self.pan_by(event.scroll_x, event.scroll_y)
+            return
+        if self.panning:
+            if event.kind == EventKind.pointer_moved:
+                self.pan_by(event.x - self.pan_x, event.y - self.pan_y)
+                self.pan_x = event.x
+                self.pan_y = event.y
+            elif event.kind == EventKind.pointer_up:
+                self.panning = false
+                self.box.set_cursor(Cursor.crosshair if self.guiding else Cursor.arrow)
+            return
+        if event.kind == EventKind.pointer_down and event.inside and (event.button == 2 or (event.button == 0 and not self.guiding)):
+            let now = clock.timestamp()
+            if event.button == 0 and now - self.pressed_at < 0.35:
+                self.pressed_at = 0.0
+                self.toggle_zoom(event.x, event.y)
+                return
+            self.pressed_at = now
+            if self.zoom > 0.0:
+                self.panning = true
+                self.pan_x = event.x
+                self.pan_y = event.y
+                self.box.set_cursor(Cursor.grab)
+            return
+        if not self.guiding:
             return
         if event.kind == EventKind.pointer_down and event.inside:
             if event.button == 1:

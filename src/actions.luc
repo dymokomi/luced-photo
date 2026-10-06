@@ -19,6 +19,8 @@ pub class Actions:
     pub let labels: list[Command]
     pub let next: Command
     pub let previous: Command
+    ## The viewer: fit the pane, or 1:1.
+    pub let zoom: Command
     # Application
     pub let palette: Command
     pub let reset_layout: Command
@@ -46,12 +48,13 @@ pub class Actions:
                        Command("No Label", id = "label_none")]
         self.next = Command("Next Photo", Shortcut(Key.right, primary = true), id = "next")
         self.previous = Command("Previous Photo", Shortcut(Key.left, primary = true), id = "previous")
+        self.zoom = Command("Zoom to Fit / 1:1", Shortcut(Key.z), id = "zoom")
         self.palette = Command("Command Palette…", Shortcut(Key.p, primary = true, shift = true), id = "palette")
         self.reset_layout = Command("Reset Layout", id = "reset_layout")
         self.quit = Command("Quit", Shortcut(Key.q, primary = true), id = "quit")
         self.all = [self.import_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
-        self.all = self.all + [self.next, self.previous, self.palette, self.reset_layout, self.quit]
+        self.all = self.all + [self.next, self.previous, self.zoom, self.palette, self.reset_layout, self.quit]
 
     ## Enable the actions on photos when some are selected.
     pub func refresh(self, has_photo: bool) -> unit!:
