@@ -58,11 +58,6 @@ def package "luced-photo" {
         str path = "../luce-color"
     }
 
-    def dependency "luce-dialogs" {
-        str owner = "dymokomi"
-        str path = "../luce-dialogs"
-    }
-
     def dependency "luce-std" {
         str owner = "dymokomi"
         str path = "../luce-std"

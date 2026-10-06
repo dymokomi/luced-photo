@@ -5,7 +5,6 @@
 ## progress shows in the status line while the grid fills in.
 from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
 from interop import Connection
-from luce_dialogs import dialogs
 from actions import Actions, label_number
 from photo_library import PhotoLibrary
 from library_pane import LibraryPane
@@ -53,6 +52,9 @@ pub class Panels:
         self.exporter = exporter.start()
         self.export_dialog = ExportDialog(font)
         self.export_dialog.chosen = self.export
+        self.export_dialog.ask_target = func (name: str) -> str!:
+            let app = self.app else return ""
+            return app.save_file("Export to", name)
         self.library_pane = LibraryPane(self.library, font)
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
@@ -167,12 +169,16 @@ pub class Panels:
 
     ## Import every photo under a folder (a card, a drive, a shoot): the importer walks it.
     func choose_import_folder(self) -> unit!:
-        let chosen = dialogs.choose_folder("Choose a folder of photos to import") else return
-        self.start_import([chosen])
+        let app = self.app else return
+        let chosen = app.choose_folder("Choose a folder of photos to import")
+        if chosen != "":
+            self.start_import([chosen])
 
     func choose_import(self) -> unit!:
-        let chosen = dialogs.open_files("Choose photos to import") else return
-        self.start_import(chosen.lines())
+        let app = self.app else return
+        let chosen = app.open_files("Choose photos to import")
+        if chosen != "":
+            self.start_import(chosen.lines())
 
     func import_dropped(self) -> unit!:
         let box = self.library_pane.grid.layout()

@@ -4,7 +4,6 @@
 ## itself runs on the exporter's thread (exporter.lucb).
 from luce_ui.ui import Dialog, Text, HStack, Spacer, Button, Font, ParameterPanel, ParameterSpec, ParameterKind
 from interop import Connection
-from luce_dialogs import dialogs
 from luce_std import paths
 
 pub class ExportDialog:
@@ -15,6 +14,9 @@ pub class ExportDialog:
     ## Export was pressed: the format, quality, long edge, where the save panel
     ## pointed, and the color space (0 sRGB, 1 Display P3).
     pub var chosen: func(int, int, int, str, int) -> unit!? = none
+    ## Ask where to save, given the suggested name: the window's save panel
+    ## (Application.save_file), "" when canceled.
+    pub var ask_target: func(str) -> str!? = none
     ## The name the save panel suggests: the first photo's.
     var suggested: str = ""
 
@@ -49,7 +51,10 @@ pub class ExportDialog:
         let edge = int(self.settings.value(self.settings.find("edge")))
         let space = int(self.settings.value(self.settings.find("space")))
         let name = paths.stem(self.suggested) + (".png" if format == 1 else ".jpg")
-        let target = dialogs.save_file("Export to", name) else return
+        let ask = self.ask_target else return
+        let target = ask(name)
+        if target == "":
+            return
         self.dialog.hide()
         if let tell = self.chosen:
             tell(format, quality, edge, target, space)
