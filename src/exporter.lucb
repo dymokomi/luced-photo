@@ -32,6 +32,8 @@ struct Shared:
     var format: i64
     var quality: i64
     var edge: i64
+    ## luce-develop export's color space: srgb or display_p3.
+    var space: i64
     var total: i64
     var done: i64
     var written: i64
@@ -67,10 +69,11 @@ func work(context: void*?):
         let format = shared.format
         let quality = shared.quality
         let edge = shared.edge
+        let space = shared.space
         shared.lock.unlock()
         var message = ""
         var buffer: u8[256]
-        export.export(job.source, job.settings, job.target, format, quality, edge) catch failure:
+        export.export(job.source, job.settings, job.target, format, quality, edge, space) catch failure:
             let length = failure.message.length if failure.message.length < 256 else 256
             memory.copy(buffer[..<length], failure.message.bytes[..<length], length)
             message = (str)buffer[..<length]
@@ -105,10 +108,12 @@ pub struct Exporter:
     var polled: Buffer
 
     ## Export with these settings from now on: `format` (luce-develop's export.jpeg
-    ## or export.png16), JPEG `quality`, and the longer side `edge` (0: full size).
-    pub func configure(format: i64, quality: i64, edge: i64):
+    ## or export.png16), JPEG `quality`, the longer side `edge` (0: full size), and
+    ## the color `space` (export.srgb or export.display_p3).
+    pub func configure(format: i64, quality: i64, edge: i64, space: i64 = 0):
         let shared = self.shared else return
         shared.lock.lock()
+        shared.space = space
         shared.format = format
         shared.quality = quality
         shared.edge = edge

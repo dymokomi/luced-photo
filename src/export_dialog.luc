@@ -1,4 +1,4 @@
-## Library › Export…: the format, quality and size, in a dialog with the same
+## Library › Export…: the format, quality, size and color space, in a dialog with the same
 ## rows as Properties, then where to write. One photo is named in the save panel;
 ## several go beside the name chosen there, each under its own name. The export
 ## itself runs on the exporter's thread (exporter.lucb).
@@ -12,9 +12,9 @@ pub class ExportDialog:
     let settings: ParameterPanel
     let title: Text
     var connections: list[Connection] = []
-    ## Export was pressed: the format, quality and long edge, and where the save
-    ## panel pointed.
-    pub var chosen: func(int, int, int, str) -> unit!? = none
+    ## Export was pressed: the format, quality, long edge, where the save panel
+    ## pointed, and the color space (0 sRGB, 1 Display P3).
+    pub var chosen: func(int, int, int, str, int) -> unit!? = none
     ## The name the save panel suggests: the first photo's.
     var suggested: str = ""
 
@@ -23,8 +23,10 @@ pub class ExportDialog:
         self.settings = ParameterPanel([
             ParameterSpec(name = "format", label = "Format", kind = ParameterKind.menu, items = "JPEG=0|PNG, 16-bit=1"),
             ParameterSpec(name = "quality", label = "Quality", kind = ParameterKind.integer, value = 92.0, minimum = 1.0, maximum = 100.0, slider = true, hide_when = "{ format == 1 }"),
-            ParameterSpec(name = "edge", label = "Size", kind = ParameterKind.menu, items = "Full Size=0|Long Edge 4096=4096|Long Edge 3000=3000|Long Edge 2048=2048|Long Edge 1080=1080")],
-            font = font, label_width = 80.0)
+            ParameterSpec(name = "edge", label = "Size", kind = ParameterKind.menu, items = "Full Size=0|Long Edge 4096=4096|Long Edge 3000=3000|Long Edge 2048=2048|Long Edge 1080=1080"),
+            ParameterSpec(name = "space", label = "Color Space", kind = ParameterKind.menu, items = "sRGB=0|Display P3=1",
+                          doc = "sRGB for the web and most screens; Display P3 keeps the deeper colors wide-gamut screens show")],
+            font = font, label_width = 96.0)
         let cancel = Button("Cancel", font = font)
         let export = Button("Export…", font = font)
         self.connections.append(cancel.on_click(func () -> unit!:
@@ -45,11 +47,12 @@ pub class ExportDialog:
         let format = int(self.settings.value(self.settings.find("format")))
         let quality = int(self.settings.value(self.settings.find("quality")))
         let edge = int(self.settings.value(self.settings.find("edge")))
+        let space = int(self.settings.value(self.settings.find("space")))
         let name = paths.stem(self.suggested) + (".png" if format == 1 else ".jpg")
         let target = dialogs.save_file("Export to", name) else return
         self.dialog.hide()
         if let tell = self.chosen:
-            tell(format, quality, edge, target)
+            tell(format, quality, edge, target, space)
 
     pub func close(self):
         for connection in self.connections:

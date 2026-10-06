@@ -236,11 +236,11 @@ pub class Panels:
 
     ## Export the selected photos as `format` at `quality` and long edge `edge`:
     ## the first to `target`, the rest beside it under their own names.
-    pub func export(self, format: int, quality: int, edge: int, target: str) -> unit!:
+    pub func export(self, format: int, quality: int, edge: int, target: str, space: int = 0) -> unit!:
         let picked = self.library_pane.selection()
         let folder = paths.directory(target)
         let extension = ".png" if format == 1 else ".jpg"
-        self.exporter.configure(format, quality, edge)
+        self.exporter.configure(format, quality, edge, space)
         var taken: set[str] = {}
         for (at, position) in picked.indexed():
             let index = self.library.index
