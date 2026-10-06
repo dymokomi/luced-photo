@@ -98,7 +98,7 @@ pub class Panels:
             self.session.histogram_due = 2
         self.bind_actions()
         let actions = self.actions
-        let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
+        let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_folder), Spacer(),
                               Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
                               Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom], font = font),

@@ -1,5 +1,6 @@
-## The Library pane: the grid of thumbnails, and its bar below with the filter,
-## the count and the thumbnail size. Thumbnails stream in from the loader's
+## The Library pane: the grid of thumbnails in justified rows, each tile its
+## photo's shape, and its bar below with the filter, the count and the row
+## height. Thumbnails stream in from the loader's
 ## threads for the cells on screen and a few rows around them; pictures far
 ## from the screen are let go, so a library of any size costs a screenful.
 from luce_ui.ui import ThumbnailGrid, Image, Slider, Text, HStack, Spacer, Menu, Command, Font, Panel, Size
@@ -21,6 +22,9 @@ pub class LibraryPane:
     ## The pictures loaded, by photo id: they outlive a refresh, which may move
     ## photos to other positions (an import adds photos among them).
     var pictures: map[int, Image] = {}
+    ## Each photo's aspect ratio as its thumbnail showed it, by id: exact, crops
+    ## included, and kept when the picture is let go.
+    var aspects: map[int, float] = {}
     ## The range of items thumbnails are kept for, as last arranged.
     var kept_first: int = -1
     var kept_last: int = -1
@@ -74,6 +78,7 @@ pub class LibraryPane:
         self.grid.set_count(index.count())
         for at in 0..<index.count():
             self.grid.set_badges(at, index.rating(at), index.flag(at), index.label(at), index.edited(at))
+            self.grid.set_aspect(at, self.aspect_of(at))
             if let picture = self.pictures[index.id(at)]:
                 self.grid.set_image(at, picture)
         let total = index.total()
@@ -83,8 +88,21 @@ pub class LibraryPane:
     ## Show another library: no picture loaded for this one's ids is kept.
     pub func show_library(self) -> unit!:
         self.pictures = {}
+        self.aspects = {}
         self.grid.select(-1)
         self.refresh()
+
+    ## The tile shape of the photo at `at`: its thumbnail's once seen, else
+    ## the catalog's size, turned for orientations 5–8 (a quarter turn).
+    func aspect_of(self, at: int) -> float:
+        let index = self.library.index
+        if let known = self.aspects[index.id(at)]:
+            return known
+        let width = float(index.width(at))
+        let height = float(index.height(at))
+        if width <= 0.0 or height <= 0.0:
+            return 1.5
+        return height / width if index.orientation(at) >= 5 else width / height
 
     ## Redraw the badges of the items at `positions`.
     pub func refresh_badges(self, positions: list[int]) -> unit!:
@@ -117,7 +135,11 @@ pub class LibraryPane:
                 let picture = Image(self.loader.taken_width(), self.loader.taken_height())
                 picture.write(self.loader.taken_pixels())
                 self.grid.set_image(at, picture)
-                self.pictures[self.library.index.id(at)] = picture
+                let id = self.library.index.id(at)
+                self.pictures[id] = picture
+                let aspect = float(self.loader.taken_width()) / float(self.loader.taken_height())
+                self.aspects[id] = aspect
+                self.grid.set_aspect(at, aspect)
             _ = self.requested.remove(at)
             at = self.loader.take()
         let first = self.grid.first_visible()

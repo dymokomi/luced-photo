@@ -3,10 +3,12 @@
 ## renderer (luce-develop), which draws it with its settings every frame, so
 ## every slider shows as it moves.
 ##
-## Zoom: the photo fits the pane until zoomed. Z (the Zoom command) or a
-## double-click toggles 1:1, one photo pixel to one screen pixel, about the
-## pointer; command-scroll or a pinch zooms about the pointer; scrolling or
-## dragging pans. Zoomed past what the viewer's develop holds, the photo loads
+## Zoom and pan, as luced-2d's canvas: the photo fits the pane until zoomed. Z
+## (the Zoom command) or a double-click toggles 1:1, one photo pixel to one
+## screen pixel, about the pointer. A mouse wheel, a touchpad pinch, or a scroll
+## with command, control or option held zooms about the pointer; touchpad
+## scrolling pans, as does dragging with the middle button or with the left
+## (outside the crop and guide tools). Zoomed past what the viewer's develop holds, the photo loads
 ## again at full size in the background and swaps in.
 ##
 ## The crop tool: while it is on, the whole corrected frame shows, the part the
@@ -20,7 +22,7 @@
 ## `on_guides` hears every change.
 from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image, Panel, Point
 from luce_gpu.gpu import RenderTarget, Rect
-from luce_window.input import Cursor, EventKind
+from luce_window.input import Cursor, EventKind, ScrollUnit
 from luce_std import math
 from luce_std import clock
 from luce_develop.renderer import Renderer
@@ -475,12 +477,20 @@ pub class Viewer: Widget:
         if self.drawn.width <= 0.0:
             return
         if event.kind == EventKind.magnify:
+            # A touchpad pinch: the magnification change, about the pointer.
             self.zoom_to(math.max(self.zoom, self.fit_zoom()) * (1.0 + event.scroll_y), event.x, event.y)
             return
         if event.kind == EventKind.scroll:
-            if event.meta or event.control:
-                self.zoom_to(math.max(self.zoom, self.fit_zoom()) * math.pow(1.1, event.scroll_y), event.x, event.y)
+            let wheel = event.scroll_unit == ScrollUnit.lines
+            if wheel and (event.shift or (event.scroll_x != 0.0 and event.scroll_y == 0.0)):
+                # Shift-wheel, or a wheel tilted sideways, pans across; a notch is 40 points.
+                self.pan_by((event.scroll_x if event.scroll_x != 0.0 else event.scroll_y) * 40.0, 0.0)
+            elif wheel or event.meta or event.control or event.alt:
+                # A notched wheel zooms about the pointer; so does any scroll with a modifier held.
+                let step = 1.0 if event.scroll_unit == ScrollUnit.points else 24.0
+                self.zoom_to(math.max(self.zoom, self.fit_zoom()) * math.pow(1.0025, event.scroll_y * step), event.x, event.y)
             else:
+                # Touchpad scrolling pans.
                 self.pan_by(event.scroll_x, event.scroll_y)
             return
         if self.panning:

@@ -158,10 +158,13 @@ shortcuts and the command palette.
 
 - **Library pane.** A sidebar lists All Photos, Recent Import, Flagged, Rejected,
   Albums and Trash. Below it is a filter bar for the minimum rating, flag, label,
-  camera and text. The ThumbnailGrid has a size slider in the pane's bottom bar
-  and supports multi-select. Keys: 0–5 set the rating, P/X/U set or clear the
+  camera and text. The ThumbnailGrid lays photos out in justified rows: each
+  tile has its photo's shape and every full row spans the width. A slider in
+  the pane's bottom bar sets the row height, and the grid supports multi-select. Keys: 0–5 set the rating, P/X/U set or clear the
   flag, 6–9 set the label.
-- **Viewer.** Fit or 100 % (space or Z), scroll to zoom, a before/after split
+- **Viewer.** Fit or 100 % (space or Z). A mouse wheel, a pinch or a
+  modifier-scroll zooms about the pointer; touchpad scrolling and middle- or
+  left-dragging pan, as in luced-2d's canvas; a before/after split
   (Y), a clipping overlay (J), and a film strip along the bottom showing the
   library's current filter.
 - **Properties pane.** Collapsible sections (Accordion), each with a reset
