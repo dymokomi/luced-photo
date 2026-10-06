@@ -93,16 +93,14 @@ pub class LibraryPane:
         self.refresh()
 
     ## The tile shape of the photo at `at`: its thumbnail's once seen, else
-    ## the catalog's size, turned for orientations 5–8 (a quarter turn).
+    ## the catalog's size (upright already).
     func aspect_of(self, at: int) -> float:
         let index = self.library.index
         if let known = self.aspects[index.id(at)]:
             return known
         let width = float(index.width(at))
         let height = float(index.height(at))
-        if width <= 0.0 or height <= 0.0:
-            return 1.5
-        return height / width if index.orientation(at) >= 5 else width / height
+        return width / height if width > 0.0 and height > 0.0 else 1.5
 
     ## Redraw the badges of the items at `positions`.
     pub func refresh_badges(self, positions: list[int]) -> unit!:

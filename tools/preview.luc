@@ -4,6 +4,8 @@
 ## the viewer's preview, then reads the frame back.
 import probe
 from app import LucedPhoto
+from luce_ui.ui import Event
+from luce_window.input import EventKind, ScrollUnit
 
 pub func main(arguments: list[str]) -> int!:
     let photo = LucedPhoto(arguments[1])
@@ -21,6 +23,9 @@ pub func main(arguments: list[str]) -> int!:
     let presetting = arguments.length > 5 and arguments[5] == "presets"
     # Open (making it) the library at the next argument.
     let switching = arguments.length > 6 and arguments[5] == "switch"
+    # A mouse wheel over the viewer's middle, then a middle-button drag, through
+    # the window's own routing.
+    let wheeling = arguments.length > 5 and arguments[5] == "wheel"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -51,6 +56,15 @@ pub func main(arguments: list[str]) -> int!:
         if ticks == 40 and presetting:
             let presets = photo.panels.library.presets
             photo.panels.presets.apply(presets.position_of_name("Preview Look"))
+        if ticks == 30 and wheeling:
+            let box = photo.panels.viewer.layout().bounds()
+            let x = box.x + box.width * 0.5
+            let y = box.y + box.height * 0.5
+            photo.app.dispatch(Event(kind = EventKind.pointer_moved, x = x, y = y))
+            photo.app.dispatch(Event(kind = EventKind.scroll, x = x, y = y, scroll_y = 12.0, scroll_unit = ScrollUnit.lines))
+            photo.app.dispatch(Event(kind = EventKind.pointer_down, button = 2, x = x, y = y))
+            photo.app.dispatch(Event(kind = EventKind.pointer_moved, button = 2, x = x + 200.0, y = y + 120.0))
+            photo.app.dispatch(Event(kind = EventKind.pointer_up, button = 2, x = x + 200.0, y = y + 120.0))
         if ticks == 30 and switching:
             photo.panels.open_library(arguments[6])
         if ticks == 40 and undoing:

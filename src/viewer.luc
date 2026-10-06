@@ -89,6 +89,10 @@ pub class Viewer: Widget:
     pub func init(self) -> unit!:
         self.box = Layout()
         self.box.set_cursor(Cursor.arrow)
+        # The viewer takes the pointer (presses, drags, double-clicks), and the
+        # wheel and the touchpad zoom and pan the photo, not a pane around it.
+        self.box.set_interactive(true)
+        self.box.set_takes_scroll(true)
         self.box.set_flex()
         self.box.set_limits(Size(240.0, 200.0), Size(16384.0, 16384.0))
         self.loader = thumbs.start(1, library.preview_edge)
@@ -241,6 +245,7 @@ pub class Viewer: Widget:
             return
         let picture = self.picture else return
         let place = self.placement(float(picture.width()), float(picture.height()))
+        self.drawn = place
         painter.image(picture, place)
 
     ## Where a `width` × `height` picture of the photo goes in the pane: fitted,
