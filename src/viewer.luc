@@ -2,9 +2,14 @@
 ## library's 2048 px preview shows at once; the photo then loads into the develop
 ## renderer (luce-develop), which draws it with its settings every frame, so
 ## every slider shows as it moves.
-from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image, Panel
+##
+## The guide tool: while it is on, the photo shows as it was taken (no
+## perspective) with its guides over it. Drag on the photo to draw a guide (four
+## at most), drag a guide's end to move it, right-click a guide to remove it;
+## `on_guides` hears every change.
+from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image, Panel, Point
 from luce_gpu.gpu import RenderTarget, Rect
-from luce_window.input import Cursor
+from luce_window.input import Cursor, EventKind
 from luce_std import math
 from luce_develop.renderer import Renderer
 from luce_develop import renderer
@@ -28,6 +33,15 @@ pub class Viewer: Widget:
     var wanted: int = -1
     ## Called when a photo's develop is ready, with its as-shot white balance.
     pub var on_developed: func(float, float) -> unit!? = none
+    ## The guide tool: whether it is on, the guides (x1, y1, x2, y2 each, 0..1 of
+    ## the photo), the end being dragged (its x's index in `guides`, or -1), and
+    ## where the photo was last drawn.
+    pub var guiding: bool = false
+    var guides: list[float] = []
+    var dragging: int = -1
+    var drawn: Rect = Rect(0.0, 0.0, 0.0, 0.0)
+    ## Called with the guides after every change the user makes.
+    pub var on_guides: func(list[float]) -> unit!? = none
 
     pub func init(self) -> unit!:
         self.box = Layout()
@@ -65,6 +79,22 @@ pub class Viewer: Widget:
         for at in 0..<1024:
             bins.append(self.developer.histogram_bin(at))
         return bins
+
+    ## Turn the guide tool on or off, showing `guides` (x1, y1, x2, y2 each).
+    pub func set_guiding(self, on: bool, guides: list[float]) -> unit!:
+        self.guiding = on
+        self.guides = guides
+        self.dragging = -1
+        self.developer.show_geometry(not on)
+        self.box.set_cursor(Cursor.crosshair if on else Cursor.arrow)
+        self.box.invalidate()
+
+    ## The size of the photo the develop shows, for solving guides: 0 before it loads.
+    pub func photo_width(self) -> int:
+        return self.developer.width()
+
+    pub func photo_height(self) -> int:
+        return self.developer.height()
 
     ## Show nothing.
     pub func clear(self) -> unit!:
@@ -105,14 +135,106 @@ pub class Viewer: Widget:
         let height = float(self.developer.height()) if developed else 0.0
         if developed:
             let place = fitted(size.width, size.height, width, height)
+            self.drawn = place
             self.developer.draw(target, place.x, place.y, place.width, place.height)
+            if self.guiding:
+                self.draw_guides(painter, place)
             return
         let picture = self.picture else return
         let place = fitted(size.width, size.height, float(picture.width()), float(picture.height()))
         painter.image(picture, place)
 
+    func draw_guides(self, painter: Painter, place: Rect) -> unit!:
+        var at = 0
+        while at + 3 < self.guides.length:
+            let a = Point(place.x + self.guides[at] * place.width, place.y + self.guides[at + 1] * place.height)
+            let b = Point(place.x + self.guides[at + 2] * place.width, place.y + self.guides[at + 3] * place.height)
+            painter.line(a, b, 3.0, theme.backdrop())
+            painter.line(a, b, 1.5, theme.accent())
+            for end in [a, b]:
+                painter.rectangle(Rect(end.x - 4.0, end.y - 4.0, 8.0, 8.0), theme.accent())
+            at += 4
+
+    ## The index (into `guides`) of the end within 10 points of (`x`, `y`), or -1.
+    func end_near(self, x: float, y: float) -> int:
+        var at = 0
+        while at + 1 < self.guides.length:
+            let ex = self.drawn.x + self.guides[at] * self.drawn.width
+            let ey = self.drawn.y + self.guides[at + 1] * self.drawn.height
+            if math.abs(ex - x) <= 10.0 and math.abs(ey - y) <= 10.0:
+                return at
+            at += 2
+        return -1
+
+    ## The guide (its first index) passing within 8 points of (`x`, `y`), or -1.
+    func guide_near(self, x: float, y: float) -> int:
+        var at = 0
+        while at + 3 < self.guides.length:
+            let ax = self.drawn.x + self.guides[at] * self.drawn.width
+            let ay = self.drawn.y + self.guides[at + 1] * self.drawn.height
+            let bx = self.drawn.x + self.guides[at + 2] * self.drawn.width
+            let by = self.drawn.y + self.guides[at + 3] * self.drawn.height
+            let dx = bx - ax
+            let dy = by - ay
+            let length = dx * dx + dy * dy
+            let t = math.max(0.0, math.min(1.0, ((x - ax) * dx + (y - ay) * dy) / length)) if length > 0.0 else 0.0
+            let px = ax + t * dx - x
+            let py = ay + t * dy - y
+            if px * px + py * py <= 64.0:
+                return at
+            at += 4
+        return -1
+
+    func on_photo(self, x: float, y: float) -> (float, float):
+        return (math.max(0.0, math.min(1.0, (x - self.drawn.x) / self.drawn.width)), math.max(0.0, math.min(1.0, (y - self.drawn.y) / self.drawn.height)))
+
+    func tell_guides(self) -> unit!:
+        if let tell = self.on_guides:
+            tell(self.guides.copy())
+
     pub func event(self, event: Event) -> unit!:
-        return
+        if not self.guiding or self.drawn.width <= 0.0:
+            return
+        if event.kind == EventKind.pointer_down and event.inside:
+            if event.button == 1:
+                let near = self.guide_near(event.x, event.y)
+                if near >= 0:
+                    for _step in 0..<4:
+                        _ = self.guides.remove_at(near)
+                    self.box.invalidate()
+                    self.tell_guides()
+                return
+            if event.button != 0:
+                return
+            let end = self.end_near(event.x, event.y)
+            if end >= 0:
+                self.dragging = end
+                return
+            if self.guides.length >= 16:
+                return
+            let (u, v) = self.on_photo(event.x, event.y)
+            self.guides = self.guides + [u, v, u, v]
+            self.dragging = self.guides.length - 2
+            self.box.invalidate()
+        elif event.kind == EventKind.pointer_moved and self.dragging >= 0:
+            let (u, v) = self.on_photo(event.x, event.y)
+            self.guides[self.dragging] = u
+            self.guides[self.dragging + 1] = v
+            self.box.invalidate()
+        elif event.kind == EventKind.pointer_up and self.dragging >= 0:
+            self.dragging = -1
+            # A click without a drag leaves no guide.
+            var at = 0
+            while at + 3 < self.guides.length:
+                let dx = (self.guides[at + 2] - self.guides[at]) * self.drawn.width
+                let dy = (self.guides[at + 3] - self.guides[at + 1]) * self.drawn.height
+                if dx * dx + dy * dy < 100.0:
+                    for _step in 0..<4:
+                        _ = self.guides.remove_at(at)
+                else:
+                    at += 4
+            self.box.invalidate()
+            self.tell_guides()
 
     pub func close(self):
         self.loader.close()

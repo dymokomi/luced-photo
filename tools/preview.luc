@@ -10,6 +10,7 @@ pub func main(arguments: list[str]) -> int!:
     let position = int(arguments[2]) if arguments.length > 2 else 0
     let cell = float(arguments[3]) if arguments.length > 3 else 0.0
     let develop = arguments[4] if arguments.length > 4 else ""
+    let guiding = arguments.length > 5 and arguments[5] == "guides"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -23,6 +24,8 @@ pub func main(arguments: list[str]) -> int!:
                 photo.panels.show_selection(position)
                 if develop != "":
                     photo.panels.apply_develop(develop)
+        if ticks == 30 and guiding:
+            photo.panels.properties.develop.set_guiding(true)
         if ticks == 90 and capture < 0:
             capture = 0
         if ticks > 200:

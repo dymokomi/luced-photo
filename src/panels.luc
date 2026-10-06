@@ -12,6 +12,7 @@ from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
 from rerender import Rerenderer
+from luce_develop import geometry
 import rerender
 
 ## Ticks (of 0.05 s) a develop change waits for more before it is saved.
@@ -56,6 +57,19 @@ pub class Panels:
         self.palette = CommandPalette(self.actions.all, font = font)
         self.library_pane.on_pick = self.show_selection
         self.properties.develop.on_change = self.develop_changed
+        let controls = self.properties.develop
+        controls.on_guide_tool = func (on: bool) -> unit!:
+            self.viewer.set_guiding(on, controls.guide_points())
+        controls.on_guides_cleared = func () -> unit!:
+            if self.viewer.guiding:
+                self.viewer.set_guiding(true, [])
+        self.viewer.on_guides = func (points: list[float]) -> unit!:
+            controls.set_guide_points(points)
+            # The guides decide the perspective: solve, show, develop.
+            if self.viewer.photo_width() > 0:
+                geometry.solve_look(controls.look, float(self.viewer.photo_width()), float(self.viewer.photo_height()))
+            controls.show_values()
+            self.develop_changed()
         self.viewer.on_developed = func (temperature: float, tint: float) -> unit!:
             self.properties.develop.set_shot(temperature, tint)
             self.histogram_due = 2
@@ -188,6 +202,7 @@ pub class Panels:
     ## Show the photo at `lead` (-1 none) in the viewer and Properties.
     pub func show_selection(self, lead: int) -> unit!:
         self.save_develop()
+        self.properties.develop.set_guiding(false)
         let selected = self.library_pane.grid.selected_count()
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)

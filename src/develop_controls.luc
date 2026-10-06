@@ -1,8 +1,8 @@
 ## The develop's controls in the Properties pane, built from luce-develop's
 ## parameter table: a collapsible section per table section (White Balance,
 ## Exposure & Tone, Levels, Curves, Color, Color Mixer, Color Grading, Black &
-## White, Lens, Effects, View), a slider per parameter, and the few that are not
-## sliders (curves, the black-and-white switch, the view). The controls edit a
+## White, Lens, Geometry, Effects, View), a slider per parameter, and the few
+## that are not sliders (curves, switches, the view, the guide tool). The controls edit a
 ## Look, luce-develop's settings object, and call `on_change` after every edit;
 ## `show` loads a photo's settings without calling it.
 from luce_ui.ui import VStack, HStack, Text, Slider, Font, Widget, Menu, Command, Button, SectionHeader, CurveEditor, Checkbox, Spacer, Size
@@ -12,7 +12,7 @@ from luce_develop import settings
 
 ## The sections in the order they show; Curves has no sliders of its own.
 func section_order() -> list[str]:
-    return ["White Balance", "Exposure & Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Effects", "View"]
+    return ["White Balance", "Exposure & Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Geometry", "Effects", "View"]
 
 ## The sections that start open.
 func opened() -> list[str]:
@@ -51,6 +51,13 @@ pub class DevelopControls:
     var channel: int = 0
     let channel_name: Text
     let black_and_white: Checkbox
+    let autocrop: Checkbox
+    let guide_tool: Button
+    ## Whether the guide tool is on.
+    pub var guiding: bool = false
+    ## Called when the guide tool is turned on or off, and when the guides are cleared.
+    pub var on_guide_tool: func(bool) -> unit!? = none
+    pub var on_guides_cleared: func() -> unit!? = none
     let view_name: Text
     var connections: list[Connection] = []
     ## The photo's as-shot white balance, which temperature 0 means.
@@ -68,6 +75,8 @@ pub class DevelopControls:
         self.curves = CurveEditor()
         self.curves.layout().set_limits(Size(200.0, 200.0), Size(320.0, 320.0))
         self.black_and_white = Checkbox("Black & White", font = font)
+        self.autocrop = Checkbox("Crop to Fit", checked = true, font = font)
+        self.guide_tool = Button("Draw Guides", font = font)
         self.view_name = Text("", font = font, muted = true)
         var rows: map[str, list[Widget]] = {}
         for title in section_order():
@@ -75,7 +84,7 @@ pub class DevelopControls:
         for at in 0..<settings.parameter_total():
             let name = settings.name_of(at)
             let section = settings.section_of(at)
-            if name == "view" or name == "bw":
+            if name == "view" or name == "bw" or name == "geometry_autocrop":
                 continue
             var held = rows[section] else []
             held.append(self.slider(at, font))
@@ -147,6 +156,20 @@ pub class DevelopControls:
             self.look.set("bw", 1.0 if on else 0.0)
             self.changed()))
         rows["Black & White"] = [self.black_and_white] + (rows["Black & White"] else [])
+        self.connections.append(self.autocrop.on_change(func (on: bool) -> unit!:
+            if self.showing:
+                return
+            self.look.set("geometry_autocrop", 1.0 if on else 0.0)
+            self.changed()))
+        self.connections.append(self.guide_tool.on_click(func () -> unit!:
+            self.set_guiding(not self.guiding)))
+        let clear_guides = Button("Clear Guides", font = font)
+        self.connections.append(clear_guides.on_click(func () -> unit!:
+            self.look.set_guides([], [], [], [])
+            if let tell = self.on_guides_cleared:
+                tell()
+            self.changed()))
+        rows["Geometry"] = [HStack([self.guide_tool, clear_guides], spacing = 4.0)] + (rows["Geometry"] else []) + [self.autocrop]
         var views: list[Command] = []
         for (at, title) in ["ACES 2.0", "Standard", "Linear"].indexed():
             let command = Command(title, id = f"view_{at}")
@@ -169,6 +192,38 @@ pub class DevelopControls:
             self.changed()))
         return HStack([Spacer(), button], spacing = 4.0)
 
+    ## Turn the guide tool on or off.
+    pub func set_guiding(self, on: bool) -> unit!:
+        if on == self.guiding:
+            return
+        self.guiding = on
+        self.guide_tool.set_text("Done" if on else "Draw Guides")
+        if let tell = self.on_guide_tool:
+            tell(on)
+
+    ## The look's guides, x1, y1, x2, y2 each.
+    pub func guide_points(self) -> list[float]:
+        var points: list[float] = []
+        for at in 0..<self.look.guide_count():
+            for end in 0..<4:
+                points.append(self.look.guide(at, end))
+        return points
+
+    ## Take `points` (x1, y1, x2, y2 each) as the look's guides.
+    pub func set_guide_points(self, points: list[float]) -> unit!:
+        var x1s: list[float] = []
+        var y1s: list[float] = []
+        var x2s: list[float] = []
+        var y2s: list[float] = []
+        var at = 0
+        while at + 3 < points.length:
+            x1s.append(points[at])
+            y1s.append(points[at + 1])
+            x2s.append(points[at + 2])
+            y2s.append(points[at + 3])
+            at += 4
+        self.look.set_guides(x1s, y1s, x2s, y2s)
+
     func changed(self) -> unit!:
         if let tell = self.on_change:
             tell()
@@ -185,11 +240,13 @@ pub class DevelopControls:
         self.shot_tint = shot_tint
         self.show_values()
 
-    func show_values(self) -> unit!:
+    ## Show the look's values on the controls (after something else changed it).
+    pub func show_values(self) -> unit!:
         self.showing = true
         for (name, slider) in self.sliders:
             slider.set_value(self.look.get(name))
         self.black_and_white.set_checked(self.look.get("bw") > 0.5)
+        self.autocrop.set_checked(self.look.get("geometry_autocrop") > 0.5)
         self.view_name.set_text(["ACES 2.0", "Standard", "Linear"][int(self.look.get("view"))])
         self.showing = false
         self.show_balance()
