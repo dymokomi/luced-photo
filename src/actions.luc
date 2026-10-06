@@ -8,6 +8,7 @@ from luce_window.input import Key
 pub class Actions:
     # Library
     pub let import_photos: Command
+    pub let import_folder: Command
     pub let export_photos: Command
     pub let select_all: Command
     pub let bigger: Command
@@ -31,6 +32,7 @@ pub class Actions:
 
     pub func init(self) -> unit!:
         self.import_photos = Command("Import Photos…", Shortcut(Key.i, primary = true, shift = true), id = "import")
+        self.import_folder = Command("Import Folder…", Shortcut(Key.o, primary = true, shift = true), id = "import_folder")
         self.export_photos = Command("Export…", Shortcut(Key.e, primary = true, shift = true), id = "export")
         self.select_all = Command("Select All", Shortcut(Key.a, primary = true), id = "select_all")
         self.bigger = Command("Larger Thumbnails", Shortcut(Key.equal, primary = true), id = "bigger")
@@ -54,7 +56,7 @@ pub class Actions:
         self.palette = Command("Command Palette…", Shortcut(Key.p, primary = true, shift = true), id = "palette")
         self.reset_layout = Command("Reset Layout", id = "reset_layout")
         self.quit = Command("Quit", Shortcut(Key.q, primary = true), id = "quit")
-        self.all = [self.import_photos, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
+        self.all = [self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
         self.all = self.all + [self.next, self.previous, self.zoom, self.palette, self.reset_layout, self.quit]
 
