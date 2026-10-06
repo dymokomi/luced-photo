@@ -2,10 +2,12 @@
 ## and the camera's metadata — capture time, camera, lens, exposure, size and
 ## orientation. A photo with no capture time keeps its file's modification time.
 import c
+import interop
 import strings
 from luce_std import files
 from luce_std import paths
 from luce_develop import source
+from luce_exif import exif
 from catalog import Photo
 from records import Pool
 
@@ -16,6 +18,12 @@ pub func describe(path: str, data: const u8[], found: source.Kind, photo: Photo*
     photo.kind = source.kind_name(found)
     photo.bytes = (i64)data.length
     photo.orientation = 1
+    # What the camera recorded; a file it cannot read keeps the defaults.
+    let read: interop.Owned[exif.Metadata]? = exif.read(data) catch failure:
+        recover none
+    if let held = read:
+        defer held.release()
+        try keep(&held.value, photo, pool)
     if photo.captured_unix == 0:
         let terminated = try strings.copy(path)
         defer strings.release(terminated)
@@ -25,6 +33,31 @@ pub func describe(path: str, data: const u8[], found: source.Kind, photo: Photo*
         var text: u8[19]
         civil_text(photo.captured_unix, text)
         photo.captured = try pool.keep_text(text)
+
+func keep(found: const exif.Metadata*, photo: Photo*, pool: Pool*) -> !:
+    photo.make = try pool.keep_text(found.make.bytes)
+    photo.model = try pool.keep_text(found.model.bytes)
+    photo.lens = try pool.keep_text(found.lens.bytes)
+    photo.shutter = try pool.keep_text(found.shutter.bytes)
+    photo.offset = try pool.keep_text(found.offset.bytes)
+    if found.captured.length == 19:
+        photo.captured = try pool.keep_text(found.captured.bytes)
+        photo.captured_unix = found.captured_unix
+    photo.exposure = found.exposure_time
+    photo.aperture = found.f_number
+    photo.iso = found.iso
+    photo.bias = found.exposure_bias
+    photo.focal = found.focal_length
+    photo.orientation = found.orientation if found.orientation >= 1 and found.orientation <= 8 else 1
+    # Sizes as the photo stands: a quarter turn swaps them.
+    let turned = photo.orientation >= 5
+    photo.width = found.height if turned else found.width
+    photo.height = found.width if turned else found.height
+    # An XMP rating of -1 is a rejected photo.
+    if found.rating < 0:
+        photo.flag = -1
+    else:
+        photo.rating = found.rating if found.rating <= 5 else 5
 
 ## `seconds` since 1970 as "YYYY-MM-DDTHH:MM:SS" in `out`.
 pub func civil_text(seconds: i64, out: u8[]):

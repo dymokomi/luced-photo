@@ -28,6 +28,11 @@ def package "luced-photo" {
         str path = "../luce-prism"
     }
 
+    def dependency "luce-exif" {
+        str owner = "dymokomi"
+        str path = "../luce-exif"
+    }
+
     def dependency "luce-raw" {
         str owner = "dymokomi"
         str path = "../luce-raw"
