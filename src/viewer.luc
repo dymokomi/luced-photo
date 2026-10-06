@@ -55,6 +55,17 @@ pub class Viewer: Widget:
         self.developer.set_look(look)
         self.box.invalidate()
 
+    ## The histogram of the develop as shown (256 bins each of red, green, blue
+    ## and luma), measured now; empty when no develop is shown.
+    pub func histogram(self) -> list[int]!:
+        if not self.developer.has_image():
+            return []
+        self.developer.compute_histogram()
+        var bins: list[int] = []
+        for at in 0..<1024:
+            bins.append(self.developer.histogram_bin(at))
+        return bins
+
     ## Show nothing.
     pub func clear(self) -> unit!:
         self.loader.clear()

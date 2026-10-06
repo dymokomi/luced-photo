@@ -37,6 +37,8 @@ pub class Panels:
     ## since its last change.
     var unsaved: int = -1
     var unsaved_ticks: int = 0
+    ## Ticks until the histogram is measured again (-1: not due).
+    var histogram_due: int = -1
     ## The photo the develop controls show.
     var developing: int = -1
     ## Ticks since the import last added photos the grid has not shown, or -1.
@@ -56,6 +58,7 @@ pub class Panels:
         self.properties.develop.on_change = self.develop_changed
         self.viewer.on_developed = func (temperature: float, tint: float) -> unit!:
             self.properties.develop.set_shot(temperature, tint)
+            self.histogram_due = 2
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
@@ -191,6 +194,7 @@ pub class Panels:
         if lead < 0:
             self.developing = -1
             self.viewer.clear()
+            self.properties.histogram.clear()
             return
         let index = self.library.index
         let id = index.id(lead)
@@ -208,6 +212,7 @@ pub class Panels:
 
     func develop_changed(self) -> unit!:
         self.viewer.set_look(self.properties.develop.look)
+        self.histogram_due = 6
         if self.developing >= 0:
             self.unsaved = self.developing
             self.unsaved_ticks = 0
@@ -256,6 +261,10 @@ pub class Panels:
         self.library_pane.tick()
         self.viewer.tick()
         self.properties.develop.tick()
+        if self.histogram_due >= 0:
+            self.histogram_due -= 1
+            if self.histogram_due < 0:
+                self.properties.histogram.set_bins(self.viewer.histogram())
         self.take_import_events()
         var redone = self.rerenderer.take()
         while redone >= 0:
