@@ -7,12 +7,12 @@ import memory
 from luce_prism import prism
 import catalog
 from catalog import Photo
-from records import Records
+from luce_std.collections import List
 
 pub struct PhotoIndex:
     var rows: catalog.Rows
     ## Positions of `rows.photos` in display order, after the filter.
-    var order: Records[u32]
+    var order: List[u32]
     ## The filter: the fewest stars shown; which flags (0 every photo, 1 picked
     ## only, -1 rejected only, 2 all but rejected); a label (0 any).
     var minimum_rating: i64
@@ -122,12 +122,12 @@ pub struct PhotoIndex:
                 continue
             if self.wanted_label != 0 and photo.label != self.wanted_label:
                 continue
-            try self.order.add((u32)at)
+            try self.order.append((u32)at)
         try sort_by_capture(self.order.items(), self.rows.photos.view())
 
     pub func close():
         self.rows.close()
-        self.order.close()
+        self.order.destroy()
 
 pub let photo_index_type: interop.Type[PhotoIndex] = interop.Type[PhotoIndex]("PhotoIndex", PhotoIndex.close, closeable = true)
 

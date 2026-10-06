@@ -9,11 +9,11 @@ from luce_std import paths
 from luce_develop import source
 from luce_exif import exif
 from catalog import Photo
-from records import Pool
+from luce_std.collections import TextPool
 
 ## Fill `photo`'s name, kind and metadata for the file at `path` holding `data`;
 ## its text is kept in `pool`.
-pub func describe(path: str, data: const u8[], found: source.Kind, photo: Photo*, pool: Pool*) -> !:
+pub func describe(path: str, data: const u8[], found: source.Kind, photo: Photo*, pool: TextPool*) -> !:
     photo.name = try pool.keep_text(paths.base(path).bytes)
     photo.kind = source.kind_name(found)
     photo.bytes = (i64)data.length
@@ -34,7 +34,7 @@ pub func describe(path: str, data: const u8[], found: source.Kind, photo: Photo*
         civil_text(photo.captured_unix, text)
         photo.captured = try pool.keep_text(text)
 
-func keep(found: const exif.Metadata*, photo: Photo*, pool: Pool*) -> !:
+func keep(found: const exif.Metadata*, photo: Photo*, pool: TextPool*) -> !:
     photo.make = try pool.keep_text(found.make.bytes)
     photo.model = try pool.keep_text(found.model.bytes)
     photo.lens = try pool.keep_text(found.lens.bytes)

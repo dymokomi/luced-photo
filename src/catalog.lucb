@@ -13,7 +13,7 @@
 import interop
 import memory
 from luce_prism import prism
-from records import Buffer, Pool, Records
+from luce_std.collections import Buffer, TextPool, List
 
 ## The identity every photo row lives in.
 pub let photos_identity: str = "photos"
@@ -59,7 +59,7 @@ pub struct Photo:
 func photo_path(id: i64, out: Buffer*) -> !:
     out.clear()
     try out.put(b"/p")
-    try out.number(id)
+    try out.put_number(id)
 
 ## Mount the photos identity unless the store has it already.
 pub func ensure(store: prism.Store*) -> !:
@@ -110,7 +110,7 @@ pub struct Batch:
     ## Add photo `photo`, or replace every field of the one with its id.
     pub func put(photo: const Photo*) -> !:
         try photo_path(photo.id, &self.path)
-        let path = self.path.text_view()
+        let path = self.path.text()
         let session = try self.session_of()
         if not try session.contains(path):
             try session.add(path, "photo")
@@ -146,7 +146,7 @@ pub struct Batch:
     ## no longer in the catalog is passed over.
     pub func set_mark(id: i64, name: str, value: i64) -> !:
         try photo_path(id, &self.path)
-        let path = self.path.text_view()
+        let path = self.path.text()
         if not try (try self.session_of()).contains(path):
             return
         try self.integer(path, name, value)
@@ -181,7 +181,7 @@ pub struct Batch:
         if let held = self.session:
             held.release()
         self.session = none
-        self.path.close()
+        self.path.destroy()
 
 ## Apply the identity's unbaked commits, so later reads and opens do not replay them.
 pub func bake(store: prism.Store*) -> !:
@@ -192,13 +192,13 @@ pub func bake(store: prism.Store*) -> !:
 
 ## Every photo row, with its text kept in `pool`, and the next id.
 pub struct Rows:
-    pub var photos: Records[Photo]
-    pub var pool: Pool
+    pub var photos: List[Photo]
+    pub var pool: TextPool
     pub var next: i64
 
     pub func close():
-        self.photos.close()
-        self.pool.close()
+        self.photos.destroy()
+        self.pool.destroy()
 
 func kept(into: Rows*, view: const prism.RowView*, name: str) -> str!:
     return try into.pool.keep_text((view.text(name) else "").bytes)
@@ -212,7 +212,7 @@ func collect(context: void*?, view: const prism.RowView*) -> !:
     if path.length < 3 or path.bytes[1] != 'p':
         return
     let id = view.integer("id") else return
-    try into.photos.add(Photo(
+    try into.photos.append(Photo(
         id = id, path = try kept(into, view, "path"), name = try kept(into, view, "name"),
         kind = try kept(into, view, "kind"), bytes = view.integer("bytes") else 0,
         sha256 = try kept(into, view, "sha256"), imported = view.integer("imported") else 0,

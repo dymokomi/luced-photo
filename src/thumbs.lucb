@@ -12,7 +12,7 @@ import thread
 from luce_std import files
 from luce_develop import source
 from luce_develop.picture import Picture
-from records import Records
+from luce_std.collections import List
 
 ## The most decoding threads a loader runs.
 let most_workers: usize = 8
@@ -32,8 +32,8 @@ struct Finished:
 struct Shared:
     var lock: sync.Mutex
     var ready: sync.Condition
-    var pending: Records[Request]
-    var finished: Records[Finished]
+    var pending: List[Request]
+    var finished: List[Finished]
     var generation: u64
     var stopping: bool
     ## Pixels decoded at most this long on their longer side.
@@ -42,11 +42,11 @@ struct Shared:
     func close():
         for request in self.pending.view():
             strings.release(request.path)
-        self.pending.close()
+        self.pending.destroy()
         for done in self.finished.view():
             var picture = done.picture
             picture.close()
-        self.finished.close()
+        self.finished.destroy()
 
 ## A worker: take the newest request, decode it, hand the picture back.
 func work(context: void*?):
@@ -68,7 +68,7 @@ func work(context: void*?):
         strings.release(request.path)
         shared.lock.lock()
         if request.generation == shared.generation:
-            shared.finished.add(Finished(index = request.index, generation = request.generation, picture = decoded)) catch failure:
+            shared.finished.append(Finished(index = request.index, generation = request.generation, picture = decoded)) catch failure:
                 var dropped = decoded
                 dropped.close()
         else:
@@ -94,7 +94,7 @@ pub struct Loader:
         let shared = self.shared else return
         let copied = try strings.copy(path)
         shared.lock.lock()
-        shared.pending.add(Request(index = index, generation = shared.generation, path = copied)) catch failure:
+        shared.pending.append(Request(index = index, generation = shared.generation, path = copied)) catch failure:
             shared.lock.unlock()
             strings.release(copied)
             error(failure.code, failure.message)
