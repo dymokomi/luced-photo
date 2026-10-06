@@ -12,6 +12,7 @@ from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
 from rerender import Rerenderer
+from develop_session import DevelopSession
 from exporter import Exporter
 import exporter
 from export_dialog import ExportDialog
@@ -19,8 +20,6 @@ from luce_std import paths
 from luce_develop import geometry
 import rerender
 
-## Ticks (of 0.05 s) a develop change waits for more before it is saved.
-let save_ticks: int = 10
 
 ## How often the grid reloads the catalog while an import adds photos, in ticks.
 let reload_ticks: int = 20
@@ -41,14 +40,8 @@ pub class Panels:
     let exporter: Exporter
     let export_dialog: ExportDialog
     var connections: list[Connection] = []
-    ## The photo whose develop changed and is not saved yet (-1 none), and ticks
-    ## since its last change.
-    var unsaved: int = -1
-    var unsaved_ticks: int = 0
-    ## Ticks until the histogram is measured again (-1: not due).
-    var histogram_due: int = -1
-    ## The photo the develop controls show.
-    var developing: int = -1
+    ## The developed photo: saving, undo and redo, settings between photos.
+    pub let session: DevelopSession
     ## Ticks since the import last added photos the grid has not shown, or -1.
     var unshown: int = -1
     pub var app: Application? = none
@@ -65,8 +58,10 @@ pub class Panels:
         self.properties = PropertiesPane(self.library, self.actions, font)
         self.status = Text("", font = font, muted = true)
         self.palette = CommandPalette(self.actions.all, font = font)
+        self.session = DevelopSession(self.library, self.properties.develop, self.viewer, self.library_pane, self.rerenderer)
+        self.session.on_status = self.tell
         self.library_pane.on_pick = self.show_selection
-        self.properties.develop.on_change = self.develop_changed
+        self.properties.develop.on_change = self.session.changed
         let controls = self.properties.develop
         controls.on_guide_tool = func (on: bool) -> unit!:
             self.viewer.set_guiding(on, controls.guide_points())
@@ -79,16 +74,17 @@ pub class Panels:
             if self.viewer.photo_width() > 0:
                 geometry.solve_look(controls.look, float(self.viewer.photo_width()), float(self.viewer.photo_height()))
             controls.show_values()
-            self.develop_changed()
+            self.session.changed()
         self.viewer.on_developed = func (temperature: float, tint: float) -> unit!:
             self.properties.develop.set_shot(temperature, tint)
-            self.histogram_due = 2
+            self.session.histogram_due = 2
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
                               Menu("Library", [actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
                               Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom], font = font),
+                              Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.sync_settings, actions.reset_settings], font = font),
                               Menu("Window", [actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
         self.dock = DStack([self.viewer.panel], font = font)
         self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.left)
@@ -141,8 +137,17 @@ pub class Panels:
         self.connections.append(actions.export_photos.on_trigger(func () -> unit!:
             let picked = self.library_pane.selection()
             if picked.length > 0:
-                self.save_develop()
+                self.session.flush()
                 self.export_dialog.open(picked.length, self.library.index.name(picked[0]))))
+        self.connections.append(actions.undo.on_trigger(self.session.undo))
+        self.connections.append(actions.redo.on_trigger(self.session.redo))
+        self.connections.append(actions.copy_settings.on_trigger(self.session.copy))
+        self.connections.append(actions.paste_settings.on_trigger(func () -> unit!:
+            self.session.paste(self.library_pane.selection())))
+        self.connections.append(actions.sync_settings.on_trigger(func () -> unit!:
+            self.session.sync(self.library_pane.selection())))
+        self.connections.append(actions.reset_settings.on_trigger(func () -> unit!:
+            self.session.reset(self.library_pane.selection())))
         self.connections.append(actions.zoom.on_trigger(func () -> unit!:
             self.viewer.toggle_zoom()))
         self.connections.append(actions.palette.on_trigger(func () -> unit!:
@@ -260,21 +265,18 @@ pub class Panels:
 
     ## Show the photo at `lead` (-1 none) in the viewer and Properties.
     pub func show_selection(self, lead: int) -> unit!:
-        self.save_develop()
         self.properties.develop.set_guiding(false)
         let selected = self.library_pane.grid.selected_count()
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)
         if lead < 0:
-            self.developing = -1
+            self.session.close_photo()
             self.viewer.clear()
             self.properties.histogram.clear()
             return
         let index = self.library.index
         let id = index.id(lead)
-        self.developing = id
-        self.properties.develop.show(index.settings(lead), 5500.0, 0.0)
-        self.viewer.set_look(self.properties.develop.look)
+        self.session.open(id, index.settings(lead))
         self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), index.width(lead), index.height(lead))
 
     # mark: the develop =========================================================================
@@ -282,29 +284,7 @@ pub class Panels:
     ## Develop the shown photo with the settings `text`, as if the user set them.
     pub func apply_develop(self, text: str) -> unit!:
         self.properties.develop.show(text, 5500.0, 0.0)
-        self.develop_changed()
-
-    func develop_changed(self) -> unit!:
-        self.viewer.set_look(self.properties.develop.look)
-        self.histogram_due = 6
-        if self.developing >= 0:
-            self.unsaved = self.developing
-            self.unsaved_ticks = 0
-
-    ## Store the develop of the photo it was made for, if it has changed.
-    func save_develop(self) -> unit!:
-        if self.unsaved < 0:
-            return
-        let id = self.unsaved
-        self.unsaved = -1
-        let text = self.properties.develop.look.text()
-        self.library.save_settings(id, text) catch failure:
-            self.tell(f"The develop was not saved: {failure.message}")
-            return
-        let at = self.library.index.position_of(id)
-        if at >= 0:
-            self.library_pane.refresh_badges([at])
-            self.rerenderer.request(id, self.library.original_path(at), text)
+        self.session.changed()
 
     ## Move the lead `direction` photos on, selecting it alone.
     func step(self, direction: int) -> unit!:
@@ -336,25 +316,22 @@ pub class Panels:
         self.viewer.tick()
         self.take_export_events()
         self.properties.develop.tick()
-        if self.histogram_due >= 0:
-            self.histogram_due -= 1
-            if self.histogram_due < 0:
+        if self.session.histogram_due >= 0:
+            self.session.histogram_due -= 1
+            if self.session.histogram_due < 0:
                 self.properties.histogram.set_bins(self.viewer.histogram())
         self.take_import_events()
         var redone = self.rerenderer.take()
         while redone >= 0:
             self.library_pane.reload_thumbnail(redone)
             redone = self.rerenderer.take()
-        if self.unsaved >= 0:
-            self.unsaved_ticks += 1
-            if self.unsaved_ticks >= save_ticks:
-                self.save_develop()
+        self.session.tick()
 
     pub func tell(self, text: str) -> unit!:
         self.status.set_text(text)
 
     pub func close(self):
-        self.save_develop() catch failure:
+        self.session.flush() catch failure:
             _ = failure
         for connection in self.connections:
             connection.disconnect()

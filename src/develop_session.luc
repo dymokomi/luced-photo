@@ -1,0 +1,209 @@
+## The develop session: the photo whose develop the controls show; saving it a
+## moment after edits settle (so a drag is one change, not hundreds); undo and
+## redo, a history per photo; and settings carried between photos — Copy and
+## Paste, Sync from the lead photo to the rest of the selection, Reset.
+## Geometry (perspective, crop, guides) belongs to one photo's framing: copying
+## leaves it out and pasting keeps the target's own.
+from photo_library import PhotoLibrary
+from develop_controls import DevelopControls
+from viewer import Viewer
+from library_pane import LibraryPane
+from rerender import Rerenderer
+
+## Ticks (of 0.05 s) an edit waits for more before it is saved as one step.
+let save_ticks: int = 10
+## The most undo steps kept per photo.
+let history_limit: int = 100
+
+## The parts of settings text `text` (`name=value` pairs, `;` between) that
+## belong to the photo's framing (`framing`) or not.
+func parts_of(text: str, framing: bool) -> list[str]:
+    var kept: list[str] = []
+    if text == "":
+        return kept
+    for part in text.split(";"):
+        let frames = part.starts_with("geometry_") or part.starts_with("guides=")
+        if frames == framing:
+            kept.append(part)
+    return kept
+
+## Settings `look` without its framing, over `target`'s framing.
+func carried(look: str, target: str) -> str:
+    return (parts_of(look, false) + parts_of(target, true)).join(";")
+
+pub class DevelopSession:
+    let library: PhotoLibrary
+    let controls: DevelopControls
+    let viewer: Viewer
+    let pane: LibraryPane
+    let rerenderer: Rerenderer
+    ## The photo developed (an id, -1 for none), its settings as last saved, and
+    ## ticks since an unsaved edit (-1: none).
+    pub var developing: int = -1
+    var committed: str = ""
+    var unsaved_ticks: int = -1
+    var undo_steps: map[int, list[str]] = {}
+    var redo_steps: map[int, list[str]] = {}
+    ## Copied settings, without framing.
+    var copied: str? = none
+    ## Ticks until the histogram is measured again (-1: not due).
+    pub var histogram_due: int = -1
+    pub var on_status: func(str) -> unit!? = none
+
+    pub func init(self, library: PhotoLibrary, controls: DevelopControls, viewer: Viewer, pane: LibraryPane, rerenderer: Rerenderer):
+        self.library = library
+        self.controls = controls
+        self.viewer = viewer
+        self.pane = pane
+        self.rerenderer = rerenderer
+
+    ## Develop photo `id`, whose settings are `text`; the photo before is saved.
+    pub func open(self, id: int, text: str) -> unit!:
+        self.flush()
+        self.developing = id
+        self.committed = text
+        self.controls.show(text, 5500.0, 0.0)
+        self.viewer.set_look(self.controls.look)
+
+    ## Develop nothing.
+    pub func close_photo(self) -> unit!:
+        self.flush()
+        self.developing = -1
+
+    ## The controls changed the look: show it, and save it once edits settle.
+    pub func changed(self) -> unit!:
+        self.viewer.set_look(self.controls.look)
+        self.histogram_due = 6
+        if self.developing >= 0:
+            self.unsaved_ticks = 0
+
+    ## Called on the window's timer.
+    pub func tick(self) -> unit!:
+        if self.unsaved_ticks >= 0:
+            self.unsaved_ticks += 1
+            if self.unsaved_ticks >= save_ticks:
+                self.flush()
+
+    ## Save an edit not saved yet, as one undo step.
+    pub func flush(self) -> unit!:
+        if self.unsaved_ticks < 0 or self.developing < 0:
+            return
+        self.unsaved_ticks = -1
+        let text = self.controls.look.text()
+        if text == self.committed:
+            return
+        self.remember(self.developing, self.committed)
+        self.store(self.developing, text)
+        self.committed = text
+
+    ## Push `text` as photo `id`'s last undo step, forgetting its redo steps.
+    func remember(self, id: int, text: str):
+        var steps = self.undo_steps[id] else []
+        steps.append(text)
+        if steps.length > history_limit:
+            _ = steps.remove_at(0)
+        self.undo_steps[id] = steps
+        self.redo_steps[id] = []
+
+    ## Save `text` as photo `id`'s settings, and make its files again.
+    func store(self, id: int, text: str) -> unit!:
+        self.library.save_settings(id, text) catch failure:
+            self.tell(f"The develop was not saved: {failure.message}")
+            return
+        let at = self.library.index.position_of(id)
+        if at >= 0:
+            self.pane.refresh_badges([at])
+            self.rerenderer.request(id, self.library.original_path(at), text)
+
+    ## Show settings `text` on the developed photo and save them, without a step.
+    func take(self, text: str) -> unit!:
+        self.controls.reload(text)
+        self.viewer.set_look(self.controls.look)
+        self.histogram_due = 2
+        self.store(self.developing, text)
+        self.committed = text
+
+    # mark: history =============================================================================
+
+    pub func undo(self) -> unit!:
+        self.flush()
+        if self.developing < 0:
+            return
+        var steps = self.undo_steps[self.developing] else []
+        if steps.length == 0:
+            self.tell("Nothing to undo.")
+            return
+        let text = steps.pop()
+        self.undo_steps[self.developing] = steps
+        var later = self.redo_steps[self.developing] else []
+        later.append(self.committed)
+        self.redo_steps[self.developing] = later
+        self.take(text)
+
+    pub func redo(self) -> unit!:
+        self.flush()
+        if self.developing < 0:
+            return
+        var later = self.redo_steps[self.developing] else []
+        if later.length == 0:
+            self.tell("Nothing to redo.")
+            return
+        let text = later.pop()
+        self.redo_steps[self.developing] = later
+        var steps = self.undo_steps[self.developing] else []
+        steps.append(self.committed)
+        self.undo_steps[self.developing] = steps
+        self.take(text)
+
+    # mark: between photos ======================================================================
+
+    ## Copy the developed photo's settings, without its framing.
+    pub func copy(self) -> unit!:
+        self.flush()
+        if self.developing < 0:
+            return
+        self.copied = parts_of(self.committed, false).join(";")
+        self.tell("Settings copied.")
+
+    ## Give the photos at `positions` settings `text`, each keeping its framing;
+    ## every photo changed gets an undo step.
+    func give(self, positions: list[int], text: str) -> int!:
+        self.flush()
+        var changed = 0
+        let index = self.library.index
+        for at in positions:
+            let id = index.id(at)
+            let before = index.settings(at)
+            let after = carried(text, before)
+            if after == before:
+                continue
+            self.remember(id, before)
+            if id == self.developing:
+                self.take(after)
+            else:
+                self.store(id, after)
+            changed += 1
+        return changed
+
+    ## Paste the copied settings onto the photos at `positions`.
+    pub func paste(self, positions: list[int]) -> unit!:
+        let text = self.copied else return
+        let changed = self.give(positions, text)
+        self.tell(f"Pasted settings onto {changed} photo{"" if changed == 1 else "s"}.")
+
+    ## Give the photos at `positions` the developed photo's settings.
+    pub func sync(self, positions: list[int]) -> unit!:
+        self.flush()
+        if self.developing < 0:
+            return
+        let changed = self.give(positions, self.committed)
+        self.tell(f"Synced settings to {changed} photo{"" if changed == 1 else "s"}.")
+
+    ## Put the photos at `positions` back as shot, keeping their framing.
+    pub func reset(self, positions: list[int]) -> unit!:
+        let changed = self.give(positions, "")
+        self.tell(f"Reset {changed} photo{"" if changed == 1 else "s"}.")
+
+    func tell(self, text: str) -> unit!:
+        if let say = self.on_status:
+            say(text)

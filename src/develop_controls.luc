@@ -302,6 +302,11 @@ pub class DevelopControls:
         self.look.load(text)
         self.set_shot(shot_temperature, shot_tint)
 
+    ## Load `text` keeping the photo's as-shot balance (undo, paste).
+    pub func reload(self, text: str) -> unit!:
+        self.look.load(text)
+        self.show_values()
+
     ## The photo's as-shot white balance, known once its develop has loaded.
     pub func set_shot(self, shot_temperature: float, shot_tint: float) -> unit!:
         self.shot_temperature = shot_temperature

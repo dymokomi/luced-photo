@@ -23,6 +23,13 @@ pub class Actions:
     pub let previous: Command
     ## The viewer: fit the pane, or 1:1.
     pub let zoom: Command
+    # The develop
+    pub let undo: Command
+    pub let redo: Command
+    pub let copy_settings: Command
+    pub let paste_settings: Command
+    pub let sync_settings: Command
+    pub let reset_settings: Command
     # Application
     pub let palette: Command
     pub let reset_layout: Command
@@ -53,12 +60,19 @@ pub class Actions:
         self.next = Command("Next Photo", Shortcut(Key.right, primary = true), id = "next")
         self.previous = Command("Previous Photo", Shortcut(Key.left, primary = true), id = "previous")
         self.zoom = Command("Zoom to Fit / 1:1", Shortcut(Key.z), id = "zoom")
+        self.undo = Command("Undo", Shortcut(Key.z, primary = true), id = "undo")
+        self.redo = Command("Redo", Shortcut(Key.z, primary = true, shift = true), id = "redo")
+        self.copy_settings = Command("Copy Settings", Shortcut(Key.c, primary = true, shift = true), id = "copy_settings")
+        self.paste_settings = Command("Paste Settings", Shortcut(Key.v, primary = true, shift = true), id = "paste_settings")
+        self.sync_settings = Command("Sync Settings to Selection", Shortcut(Key.s, primary = true, shift = true), id = "sync_settings")
+        self.reset_settings = Command("Reset Settings", Shortcut(Key.r, primary = true, shift = true), id = "reset_settings")
         self.palette = Command("Command Palette…", Shortcut(Key.p, primary = true, shift = true), id = "palette")
         self.reset_layout = Command("Reset Layout", id = "reset_layout")
         self.quit = Command("Quit", Shortcut(Key.q, primary = true), id = "quit")
         self.all = [self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
-        self.all = self.all + [self.next, self.previous, self.zoom, self.palette, self.reset_layout, self.quit]
+        self.all = self.all + [self.next, self.previous, self.zoom, self.undo, self.redo, self.copy_settings, self.paste_settings,
+                               self.sync_settings, self.reset_settings, self.palette, self.reset_layout, self.quit]
 
     ## Enable the actions on photos when some are selected.
     pub func refresh(self, has_photo: bool) -> unit!:
