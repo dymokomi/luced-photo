@@ -1,5 +1,5 @@
-## The window: a toolbar over three docked panes — Library, Viewer and Properties —
-## with a status line below. The panels carry what happens between the panes:
+## The window: a toolbar over docked panes — Library with Presets below it, Viewer
+## and Properties — with a status line below. The panels carry what happens between the panes:
 ## picking photos in the grid shows the lead one in the viewer and its facts in
 ## Properties; ratings, flags and labels act on the whole selection; an import's
 ## progress shows in the status line while the grid fills in.
@@ -10,6 +10,7 @@ from photo_library import PhotoLibrary
 from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
+from presets_pane import PresetsPane
 from rerender import Rerenderer
 from develop_session import DevelopSession
 from exporter import Exporter
@@ -30,6 +31,7 @@ pub class Panels:
     pub let library_pane: LibraryPane
     pub let viewer: Viewer
     pub let properties: PropertiesPane
+    pub let presets: PresetsPane
     pub let dock: DStack
     let status: Text
     let palette: CommandPalette
@@ -62,6 +64,11 @@ pub class Panels:
         self.palette = CommandPalette(self.actions.all, font = font)
         self.session = DevelopSession(self.library, self.properties.develop, self.viewer, self.library_pane, self.rerenderer)
         self.session.on_status = self.tell
+        self.presets = PresetsPane(self.library, font)
+        self.presets.current = self.session.preset_text
+        self.presets.on_status = self.tell
+        self.presets.on_apply = func (name: str, text: str) -> unit!:
+            self.session.apply_preset(self.library_pane.selection(), name, text)
         self.library_pane.on_pick = self.show_selection
         self.properties.develop.on_change = self.session.changed
         let controls = self.properties.develop
@@ -100,6 +107,8 @@ pub class Panels:
         self.dock.set_fraction(self.library_pane.panel, 0.34)
         self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
         self.dock.set_fraction(self.viewer.panel, 0.7)
+        self.dock.add(self.presets.panel, self.library_pane.panel, DockPosition.bottom)
+        self.dock.set_fraction(self.library_pane.panel, 0.72)
         self.dock.layout().set_flex()
         let footer = HStack([self.status], padding = 6.0)
         self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
@@ -363,4 +372,5 @@ pub class Panels:
         self.library_pane.close()
         self.viewer.close()
         self.properties.close()
+        self.presets.close()
         self.library.close()

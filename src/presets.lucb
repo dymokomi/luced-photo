@@ -1,0 +1,189 @@
+## Presets: named develop settings kept in the library's catalog, beside the
+## photos, in an identity of their own:
+##
+##     /state    next       the id the next preset takes
+##     /r<id>    preset     id, name, settings (the develop's text form, without
+##                          framing: develop_session.luc decides what that is)
+##
+## Luce reads them all into a PresetList, sorted by name, and writes one preset
+## at a time; a list read before a write is read again to see it.
+import interop
+import memory
+from luce_prism import prism
+from luce_std.collections import Buffer, TextPool, List
+
+pub let presets_identity: str = "presets"
+
+## How long a commit waits for another writer of the identity.
+let wait_ms: i64 = 2000
+
+pub struct Preset:
+    pub var id: i64
+    pub var name: str
+    pub var settings: str
+
+## Every preset, by name; text kept in `pool`.
+pub struct PresetList:
+    var presets: List[Preset]
+    var pool: TextPool
+    var next: i64
+
+    pub func count() -> i64:
+        return (i64)self.presets.length()
+
+    func preset(at: i64) -> Preset:
+        if at < 0 or at >= (i64)self.presets.length():
+            trap("no preset at that position")
+        return self.presets.at((usize)at)
+
+    pub func id(at: i64) -> i64:
+        return self.preset(at).id
+    pub func name(at: i64) -> str:
+        return self.preset(at).name
+    pub func settings(at: i64) -> str:
+        return self.preset(at).settings
+
+    ## The position of the preset named `name`, ignoring case, or -1.
+    pub func position_of_name(name: str) -> i64:
+        for (at, preset) in self.presets.view().indexed():
+            if compare_names(preset.name, name) == 0:
+                return (i64)at
+        return -1
+
+    pub func close():
+        self.presets.destroy()
+        self.pool.destroy()
+
+pub let preset_list_type: interop.Type[PresetList] = interop.Type[PresetList]("PresetList", PresetList.close, closeable = true)
+
+## `a` against `b` as names are listed: ignoring ASCII case, then by bytes.
+func compare_names(a: str, b: str) -> i64:
+    let shorter = a.length if a.length < b.length else b.length
+    for at in 0..<shorter:
+        let x = lower(a.bytes[at])
+        let y = lower(b.bytes[at])
+        if x != y:
+            return -1 if x < y else 1
+    if a.length != b.length:
+        return -1 if a.length < b.length else 1
+    return 0
+
+func lower(byte: u8) -> u8:
+    return byte + 32 if byte >= 'A' and byte <= 'Z' else byte
+
+func collect(context: void*?, view: const prism.RowView*) -> !:
+    let into = (PresetList*)(context else error(prism.invalid, "no presets"))
+    let path = view.path()
+    if path == "/state":
+        into.next = view.integer("next") else into.next
+        return
+    if path.length < 3 or path.bytes[1] != 'r':
+        return
+    let id = view.integer("id") else return
+    let name = try into.pool.keep_text((view.text("name") else "").bytes)
+    let settings = try into.pool.keep_text((view.text("settings") else "").bytes)
+    try into.presets.append(Preset(id = id, name = name, settings = settings))
+    if id >= into.next:
+        into.next = id + 1
+
+## Every preset in `store`, sorted by name.
+pub func read_presets(store: interop.Reference[prism.Store]) -> interop.Reference[PresetList]!:
+    var list = PresetList(next = 1)
+    errdefer list.close()
+    let held = try store.get()
+    if try held.mounted(presets_identity):
+        let snap = try held.snapshot_identity(presets_identity)
+        defer snap.release()
+        try (try snap.get()).each_child("/", collect, &list)
+    # Few presets: an insertion sort.
+    let items = list.presets.items()
+    for at in 1..<items.length:
+        let moving = items[at]
+        var to = at
+        while to > 0 and compare_names(items[to - 1].name, moving.name) > 0:
+            items[to] = items[to - 1]
+            to -= 1
+        items[to] = moving
+    let made = try new PresetList(presets = list.presets, pool = list.pool, next = list.next) in memory.heap
+    return try interop.Reference[PresetList].adopt(made, preset_list_type, memory.heap)
+
+## One session of writes to the presets identity.
+struct Writer:
+    var session: interop.Reference[prism.Session]
+    var path: Buffer
+
+    static func begin(store: prism.Store*) -> Writer!:
+        if not try store.mounted(presets_identity):
+            store.mount(presets_identity) catch failure:
+                if not try store.mounted(presets_identity):
+                    error(failure.code, failure.message)
+        return Writer(session = try store.begin_identity(presets_identity))
+
+    func at(id: i64) -> str!:
+        self.path.clear()
+        try self.path.put(b"/r")
+        try self.path.put_number(id)
+        return self.path.text()
+
+    func text(path: str, name: str, value: str) -> !:
+        let held = try prism.Value.text(value)
+        defer held.release()
+        try (try self.session.get()).set(path, name, held)
+
+    func integer(path: str, name: str, value: i64) -> !:
+        let held = try prism.Value.integer(value)
+        defer held.release()
+        try (try self.session.get()).set(path, name, held)
+
+    func commit() -> !:
+        _ = try (try self.session.get()).commit(wait_ms = wait_ms)
+
+    func close():
+        self.session.release()
+        self.path.destroy()
+
+## Keep `settings` as the preset named `name`: the one of that name (ignoring
+## case) in `list` takes them, else a new preset. Its id.
+pub func save_preset(store: interop.Reference[prism.Store], list: interop.Reference[PresetList], name: str, settings: str) -> i64!:
+    let presets = try list.get()
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let found = presets.position_of_name(name)
+    let id = presets.id(found) if found >= 0 else presets.next
+    let path = try writer.at(id)
+    let session = try writer.session.get()
+    if found < 0:
+        try session.add(path, "preset")
+        try writer.integer(path, "id", id)
+        if not try session.contains("/state"):
+            try session.add("/state", "state")
+        try writer.integer("/state", "next", id + 1)
+    try writer.text(path, "name", name)
+    try writer.text(path, "settings", settings)
+    try writer.commit()
+    return id
+
+## Give preset `id` the name `name`.
+pub func rename_preset(store: interop.Reference[prism.Store], id: i64, name: str) -> !:
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let path = try writer.at(id)
+    if not try (try writer.session.get()).contains(path):
+        return
+    try writer.text(path, "name", name)
+    try writer.commit()
+
+## Remove preset `id`.
+pub func delete_preset(store: interop.Reference[prism.Store], id: i64) -> !:
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let path = try writer.at(id)
+    if not try (try writer.session.get()).contains(path):
+        return
+    try (try writer.session.get()).remove(path)
+    try writer.commit()
+
+test "names sort ignoring case":
+    assert(compare_names("apple", "Banana") < 0)
+    assert(compare_names("Mono", "mono") == 0)
+    assert(compare_names("Warm", "Warm 2") < 0)

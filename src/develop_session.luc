@@ -1,14 +1,16 @@
 ## The develop session: the photo whose develop the controls show; saving it a
 ## moment after edits settle (so a drag is one change, not hundreds); undo and
 ## redo, a history per photo; and settings carried between photos — Copy and
-## Paste, Sync from the lead photo to the rest of the selection, Reset.
-## Geometry (perspective, crop, guides) belongs to one photo's framing: copying
-## leaves it out and pasting keeps the target's own.
+## Paste, Sync from the lead photo to the rest of the selection, Reset, and
+## presets. Geometry (perspective, crop, guides) belongs to one photo's framing:
+## copying leaves it out and pasting keeps the target's own. A preset stacks, as
+## Capture One's styles do: what it sets replaces the photo's, the rest stays.
 from photo_library import PhotoLibrary
 from develop_controls import DevelopControls
 from viewer import Viewer
 from library_pane import LibraryPane
 from rerender import Rerenderer
+from luce_develop import settings
 
 ## Ticks (of 0.05 s) an edit waits for more before it is saved as one step.
 let save_ticks: int = 10
@@ -22,7 +24,7 @@ func parts_of(text: str, framing: bool) -> list[str]:
     if text == "":
         return kept
     for part in text.split(";"):
-        let frames = part.starts_with("geometry_") or part.starts_with("guides=")
+        let frames = part.starts_with("geometry_") or part.starts_with("crop_") or part.starts_with("guides=")
         if frames == framing:
             kept.append(part)
     return kept
@@ -30,6 +32,26 @@ func parts_of(text: str, framing: bool) -> list[str]:
 ## Settings `look` without its framing, over `target`'s framing.
 func carried(look: str, target: str) -> str:
     return (parts_of(look, false) + parts_of(target, true)).join(";")
+
+## The name a part of settings text sets: "exposure" of "exposure=0.7".
+func name_in(part: str) -> str:
+    let parts = part.split("=")
+    return parts[0]
+
+## Preset `preset` stacked on settings `target`: the preset's values replace
+## the target's of those names, the target's others and its framing stay. In
+## the text form's own order, so an unchanged photo compares equal.
+func stacked(preset: str, target: str) -> str!:
+    let laid = parts_of(preset, false)
+    var named: set[str] = {}
+    for part in laid:
+        named.insert(name_in(part))
+    var kept: list[str] = []
+    if target != "":
+        for part in target.split(";"):
+            if not (name_in(part) in named):
+                kept.append(part)
+    return settings.look((kept + laid).join(";")).text()
 
 pub class DevelopSession:
     let library: PhotoLibrary
@@ -165,16 +187,16 @@ pub class DevelopSession:
         self.copied = parts_of(self.committed, false).join(";")
         self.tell("Settings copied.")
 
-    ## Give the photos at `positions` settings `text`, each keeping its framing;
-    ## every photo changed gets an undo step.
-    func give(self, positions: list[int], text: str) -> int!:
+    ## Give the photos at `positions` settings `text`, each keeping its framing,
+    ## or stacked on their own (`stack`); every photo changed gets an undo step.
+    func give(self, positions: list[int], text: str, stack: bool = false) -> int!:
         self.flush()
         var changed = 0
         let index = self.library.index
         for at in positions:
             let id = index.id(at)
             let before = index.settings(at)
-            let after = carried(text, before)
+            let after = stacked(text, before) if stack else carried(text, before)
             if after == before:
                 continue
             self.remember(id, before)
@@ -203,6 +225,24 @@ pub class DevelopSession:
     pub func reset(self, positions: list[int]) -> unit!:
         let changed = self.give(positions, "")
         self.tell(f"Reset {changed} photo{"" if changed == 1 else "s"}.")
+
+    # mark: presets ===========================================================================
+
+    ## The developed photo's settings as a preset holds them: without its
+    ## framing; none without a developed photo.
+    pub func preset_text(self) -> str?!:
+        self.flush()
+        if self.developing < 0:
+            return none
+        return parts_of(self.committed, false).join(";")
+
+    ## Stack preset `name`, settings `text`, on the photos at `positions`.
+    pub func apply_preset(self, positions: list[int], name: str, text: str) -> unit!:
+        if positions.length == 0:
+            self.tell("Select photos to apply a preset to.")
+            return
+        let changed = self.give(positions, text, stack = true)
+        self.tell(f"Applied “{name}” to {changed} photo{"" if changed == 1 else "s"}." if changed > 0 else f"“{name}” changes nothing here.")
 
     func tell(self, text: str) -> unit!:
         if let say = self.on_status:

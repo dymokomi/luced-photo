@@ -1,5 +1,5 @@
 ## The library the window shows: the bundle on disk, its catalog, the index of
-## photos the panes read, and the import that may be running. The panes never
+## photos the panes read, the develop presets, and the import that may be running. The panes never
 ## touch the catalog themselves; they ask the library.
 from luce_prism import prism
 from luce_std import files
@@ -9,6 +9,8 @@ from photo_index import PhotoIndex
 import photo_index
 from importer import Importer
 import importer
+from presets import PresetList
+import presets
 
 ## An import was asked for while another runs.
 pub let busy = ErrorCode.package(20)
@@ -21,6 +23,8 @@ pub class PhotoLibrary:
     pub let root: str
     pub let store: prism.Store
     pub var index: PhotoIndex
+    ## The develop presets, by name; read again after every change.
+    pub var presets: PresetList
     var running: Importer? = none
     ## The filter the index applies (PhotoIndex.filter).
     var minimum_rating: int = 0
@@ -32,6 +36,7 @@ pub class PhotoLibrary:
         library.ensure(root)
         self.store = prism.Store.open(library.catalog_path(root))
         self.index = photo_index.read_index(self.store)
+        self.presets = presets.read_presets(self.store)
 
     ## Read the catalog again, keeping the filter.
     pub func reload(self) -> unit!:
@@ -114,6 +119,22 @@ pub class PhotoLibrary:
         let at = self.index.position_of(id)
         if at >= 0:
             self.index.set_settings(at, text)
+
+    # mark: presets =============================================================================
+
+    ## Keep settings `text` as the preset `name` (replacing one of that name); its id.
+    pub func save_preset(self, name: str, text: str) -> int!:
+        let id = presets.save_preset(self.store, self.presets, name, text)
+        self.presets = presets.read_presets(self.store)
+        return id
+
+    pub func rename_preset(self, id: int, name: str) -> unit!:
+        presets.rename_preset(self.store, id, name)
+        self.presets = presets.read_presets(self.store)
+
+    pub func delete_preset(self, id: int) -> unit!:
+        presets.delete_preset(self.store, id)
+        self.presets = presets.read_presets(self.store)
 
     pub func close(self):
         if let current = self.running:

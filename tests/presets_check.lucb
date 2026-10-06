@@ -1,0 +1,53 @@
+## Presets round-trip through a fresh catalog at the first argument (a folder
+## that need not exist): save, save again by the same name, rename, delete,
+## and read back after reopening. Prints PASS or traps.
+import interop
+from luce_prism import prism
+from luce_std import files
+from luce_std import paths
+import presets
+
+func names(store: interop.Reference[prism.Store]) -> interop.Reference[presets.PresetList]!:
+    return try presets.read_presets(store)
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length < 2:
+        print("usage: presets_check FOLDER")
+        return 2
+    try files.ensure_directory(arguments[1])
+    let path = try paths.join(arguments[1], "presets.prism")
+    defer path.release()
+    var store = try prism.Store.open(path.value)
+    var list = try names(store)
+    assert((try list.get()).count() == 0)
+    let warm = try presets.save_preset(store, list, "Warm", "temperature=6500")
+    list.release()
+    list = try names(store)
+    let mono = try presets.save_preset(store, list, "mono", "bw=1")
+    list.release()
+    list = try names(store)
+    # The same name, in another case, replaces the name and settings, keeping the id.
+    let again = try presets.save_preset(store, list, "WARM", "temperature=7000;saturation=10")
+    assert(again == warm and mono != warm)
+    try presets.rename_preset(store, mono, "Black and White")
+    list.release()
+    (try store.get()).close()
+    store.release()
+    store = try prism.Store.open(path.value)
+    list = try names(store)
+    let read = try list.get()
+    assert(read.count() == 2)
+    assert(read.name(0) == "Black and White" and read.settings(0) == "bw=1")
+    assert(read.name(1) == "WARM" and read.settings(1) == "temperature=7000;saturation=10")
+    try presets.delete_preset(store, warm)
+    list.release()
+    list = try names(store)
+    assert((try list.get()).count() == 1 and (try list.get()).id(0) == mono)
+    # The next preset takes a fresh id, not the deleted one's.
+    let fresh = try presets.save_preset(store, list, "Fresh", "")
+    assert(fresh != warm and fresh != mono)
+    list.release()
+    (try store.get()).close()
+    store.release()
+    print("PASS presets save, replace, rename, delete and reopen")
+    return 0

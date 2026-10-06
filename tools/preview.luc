@@ -17,6 +17,8 @@ pub func main(arguments: list[str]) -> int!:
     let exporting = arguments.length > 6 and arguments[5] == "export"
     let undoing = arguments.length > 5 and arguments[5] == "undo"
     let cropping = arguments.length > 5 and arguments[5] == "crop"
+    # Save the --develop edit as a preset, then click it on the next photo.
+    let presetting = arguments.length > 5 and arguments[5] == "presets"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -36,6 +38,17 @@ pub func main(arguments: list[str]) -> int!:
             photo.panels.properties.develop.open_only(["Color Mixer", "Color Grading", "Black & White"])
         if ticks == 30 and cropping:
             photo.panels.properties.develop.set_cropping(true)
+        if ticks == 30 and presetting:
+            let panels = photo.panels
+            let text = panels.session.preset_text() else return
+            _ = panels.library.save_preset("Preview Look", text)
+            _ = panels.library.save_preset("Another Look", "saturation=-40")
+            panels.presets.show()
+            grid.select(position + 1)
+            panels.show_selection(position + 1)
+        if ticks == 40 and presetting:
+            let presets = photo.panels.library.presets
+            photo.panels.presets.apply(presets.position_of_name("Preview Look"))
         if ticks == 40 and undoing:
             photo.panels.session.undo()
         if ticks == 10 and exporting:

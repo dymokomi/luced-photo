@@ -129,6 +129,7 @@ Catalog identities (luce-prism):
 | --- | --- | --- |
 | `photos` | `/p<id>` | path, name, format, bytes, sha256, imported, captured, offset, width, height, orientation, make, model, lens, focal, aperture, shutter, iso, exposure_bias, gps, rating, flag, label, keywords, edited |
 | `edits` | `/p<id>` | one property per develop setting that differs from the default |
+| `presets` | `/r<id>` | id, name, settings (text form, without framing); `/state` next id |
 | `albums` | `/a<id>` | name, order, members (int list) |
 | `library` | `/state` | schema version, last import, grid size |
 
@@ -175,7 +176,14 @@ shortcuts and the command palette.
   13. View: the view transform (ACES 2.0 / Standard / Linear) and the display space
 - **Edits** are non-destructive and stored in the catalog. Every change is an
   undo step, with drags coalesced. Copy/paste settings, sync to the selection,
-  and reset are supported.
+  and reset are supported. None of them carries framing (perspective, crop,
+  guides) from one photo to another.
+- **Presets pane**, below the Library: named settings kept in the catalog, so
+  they travel with the library. A click stacks the preset on the selected
+  photos, as Capture One's styles do: the values it holds replace the photo's,
+  and the rest stay. Each photo changed gets an undo step. The footer saves the
+  developed photo's settings as a new preset, saves them over the chosen one,
+  renames it and deletes it. A right-click on a row offers the same.
 - **Export** runs the CPU path to JPEG, TIFF 16-bit or PNG, in sRGB, Display P3 or
   Rec.2020, with a resize option. It runs on a worker, with progress shown in the
   status line.

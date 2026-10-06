@@ -1,0 +1,189 @@
+## The Presets pane: named develop settings, by name. A click on a preset
+## stacks it on the selected photos (develop_session.luc says how). The
+## footer saves the developed photo's settings as a new preset, saves them
+## over the chosen one, renames it and deletes it; the row's menu (right-click)
+## does the same for the row pressed. The presets live in the catalog
+## (presets.lucb), so they travel with the library.
+from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
+from interop import Connection
+from photo_library import PhotoLibrary
+
+pub class PresetsPane:
+    pub let panel: Panel
+    let library: PhotoLibrary
+    let rows: ListView
+    let row_menu: ContextMenu
+    let prompt: TextPrompt
+    let confirm: ConfirmDialog
+    let apply_command: Command
+    let update_command: Command
+    let rename_command: Command
+    let delete_command: Command
+    let font: Font
+    var connections: list[Connection] = []
+    ## What the prompt asks for: "save" a new preset's name or "rename" the
+    ## preset with id `renaming`.
+    var asking: str = ""
+    var renaming: int = -1
+    ## The settings a new preset takes: the photo's when Save was pressed.
+    var pending: str = ""
+    var deleting: int = -1
+    ## The developed photo's settings as a preset holds them, none without one.
+    pub var current: func() -> str?!? = none
+    ## A preset was clicked: its name and settings.
+    pub var on_apply: func(str, str) -> unit!? = none
+    pub var on_status: func(str) -> unit!? = none
+
+    pub func init(self, library: PhotoLibrary, font: Font) -> unit!:
+        self.library = library
+        self.font = font
+        self.rows = ListView([], font = font)
+        self.rows.layout().set_flex()
+        self.connections.append(self.rows.on_activate(self.apply))
+        self.apply_command = Command("Apply to Selected Photos", id = "preset_apply")
+        self.update_command = Command("Update with Current Settings", id = "preset_update")
+        self.rename_command = Command("Rename Preset…", id = "preset_rename")
+        self.delete_command = Command("Delete Preset…", id = "preset_delete")
+        self.connections.append(self.apply_command.on_trigger(func () -> unit!:
+            self.apply(self.rows.selected_index())))
+        self.connections.append(self.update_command.on_trigger(self.update_chosen))
+        self.connections.append(self.rename_command.on_trigger(self.rename_chosen))
+        self.connections.append(self.delete_command.on_trigger(self.delete_chosen))
+        self.row_menu = ContextMenu(self.rows, [self.apply_command, self.update_command, self.rename_command, Command("", divider = true), self.delete_command], font = font)
+        self.connections.append(self.row_menu.on_open(self.fit_menu))
+        self.prompt = TextPrompt(font = font)
+        self.connections.append(self.prompt.on_submit(self.submitted))
+        self.confirm = ConfirmDialog(font = font)
+        self.connections.append(self.confirm.on_choose(self.chosen_delete))
+        let content = VStack([self.row_menu, self.prompt, self.confirm], spacing = 0.0)
+        content.layout().set_flex()
+        let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("save", self.update_chosen),
+                           self.shelf_button("text-tool", self.rename_chosen), Spacer(), self.shelf_button("trash", self.delete_chosen)])
+        self.panel = Panel("Presets", content, minimum = Size(220.0, 120.0), closable = false, footer = shelf, id = "presets")
+        self.show()
+
+    func shelf_button(self, icon: str, callback: func() -> unit!) -> Button!:
+        let button = Button(icon = icon, font = self.font)
+        button.set_style(ButtonStyle.plain)
+        self.connections.append(button.on_click(callback))
+        button.layout().set_size(self.font.line_height() + 3.0, self.font.line_height() + 3.0)
+        return button
+
+    ## List the library's presets, keeping the chosen one chosen.
+    pub func show(self, chosen_id: int = -1) -> unit!:
+        let presets = self.library.presets
+        var items: list[ListItem] = []
+        for at in 0..<presets.count():
+            items.append(ListItem(text = presets.name(at)))
+        self.rows.set_items(items)
+        for at in 0..<presets.count():
+            if presets.id(at) == chosen_id:
+                self.rows.select(at)
+        self.panel.set_text("Presets" if presets.count() == 0 else f"Presets · {presets.count()}")
+
+    ## The preset chosen in the list, or -1.
+    func chosen(self) -> int:
+        let at = self.rows.selected_index()
+        return at if at >= 0 and at < self.library.presets.count() else -1
+
+    func fit_menu(self) -> unit!:
+        let any = self.chosen() >= 0
+        for command in [self.apply_command, self.update_command, self.rename_command, self.delete_command]:
+            command.set_enabled(any)
+
+    ## The developed photo's settings, or none (and why) without one.
+    func current_settings(self) -> str?!:
+        let ask = self.current else return none
+        if let text = ask():
+            return text
+        self.tell("Select a photo whose settings to keep.")
+        return none
+
+    ## Stack the preset at `at` on the selected photos, as a click does.
+    pub func apply(self, at: int) -> unit!:
+        if at < 0 or at >= self.library.presets.count():
+            return
+        if let tell = self.on_apply:
+            tell(self.library.presets.name(at), self.library.presets.settings(at))
+
+    # mark: saving =============================================================================
+
+    func save_new(self) -> unit!:
+        let text = self.current_settings() else return
+        self.pending = text
+        self.asking = "save"
+        self.prompt.open("Save the photo’s settings as a preset named", self.free_name(), accept = "Save")
+
+    func update_chosen(self) -> unit!:
+        let at = self.chosen()
+        if at < 0:
+            self.tell("Choose a preset to update.")
+            return
+        let text = self.current_settings() else return
+        let name = self.library.presets.name(at)
+        let id = self.library.save_preset(name, text)
+        self.show(id)
+        self.tell(f"Updated “{name}” with the photo’s settings.")
+
+    func rename_chosen(self) -> unit!:
+        let at = self.chosen()
+        if at < 0:
+            return
+        self.asking = "rename"
+        self.renaming = self.library.presets.id(at)
+        self.prompt.open("Rename the preset", self.library.presets.name(at), accept = "Rename")
+
+    func submitted(self, typed: str) -> unit!:
+        let name = typed.trim()
+        let asking = self.asking
+        self.asking = ""
+        if name == "":
+            return
+        if asking == "save":
+            let replacing = self.library.presets.position_of_name(name) >= 0
+            let id = self.library.save_preset(name, self.pending)
+            self.show(id)
+            self.tell(f"Updated “{name}”." if replacing else f"Saved the preset “{name}”.")
+        elif asking == "rename":
+            let taken = self.library.presets.position_of_name(name)
+            if taken >= 0 and self.library.presets.id(taken) != self.renaming:
+                self.tell(f"A preset is already named “{name}”.")
+                return
+            self.library.rename_preset(self.renaming, name)
+            self.show(self.renaming)
+
+    ## "Preset", else "Preset 2", "Preset 3"… : a name no preset has.
+    func free_name(self) -> str:
+        let presets = self.library.presets
+        var name = "Preset"
+        var number = 2
+        while presets.position_of_name(name) >= 0:
+            name = f"Preset {number}"
+            number += 1
+        return name
+
+    # mark: deleting ===========================================================================
+
+    func delete_chosen(self) -> unit!:
+        let at = self.chosen()
+        if at < 0:
+            return
+        self.deleting = self.library.presets.id(at)
+        self.confirm.open(f"Delete the preset “{self.library.presets.name(at)}”? Photos keep the settings it gave them.", "Delete", "")
+
+    func chosen_delete(self, role: int) -> unit!:
+        let id = self.deleting
+        self.deleting = -1
+        if role != 0 or id < 0:
+            return
+        self.library.delete_preset(id)
+        self.show()
+
+    func tell(self, text: str) -> unit!:
+        if let say = self.on_status:
+            say(text)
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
