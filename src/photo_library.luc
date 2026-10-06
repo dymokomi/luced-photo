@@ -1,0 +1,115 @@
+## The library the window shows: the bundle on disk, its catalog, the index of
+## photos the panes read, and the import that may be running. The panes never
+## touch the catalog themselves; they ask the library.
+from luce_prism import prism
+from luce_std import files
+from luce_std import paths
+import library
+from photo_index import PhotoIndex
+import photo_index
+from importer import Importer
+import importer
+
+## An import was asked for while another runs.
+pub let busy = ErrorCode.package(20)
+
+## The bundle luced-photo opens unless told otherwise.
+pub func default_root() -> str!:
+    return paths.join(paths.join(files.home_directory(), "Pictures"), "Luced Photo.library")
+
+pub class PhotoLibrary:
+    pub let root: str
+    pub let store: prism.Store
+    pub var index: PhotoIndex
+    var running: Importer? = none
+    ## The filter the index applies (PhotoIndex.filter).
+    var minimum_rating: int = 0
+    var flags: int = 0
+    var label: int = 0
+
+    pub func init(self, root: str) -> unit!:
+        self.root = root
+        library.ensure(root)
+        self.store = prism.Store.open(library.catalog_path(root))
+        self.index = photo_index.read_index(self.store)
+
+    ## Read the catalog again, keeping the filter.
+    pub func reload(self) -> unit!:
+        self.index = photo_index.read_index(self.store)
+        self.index.filter(self.minimum_rating, self.flags, self.label)
+
+    ## Show only photos with at least `minimum_rating` stars, flags `flags` (0
+    ## all, 1 picked, -1 rejected, 2 all but rejected) and label `label` (0 any).
+    pub func set_filter(self, minimum_rating: int, flags: int, label: int) -> unit!:
+        self.minimum_rating = minimum_rating
+        self.flags = flags
+        self.label = label
+        self.index.filter(minimum_rating, flags, label)
+
+    # mark: importing ===========================================================================
+
+    ## Import the files and folders at `sources` on a thread of their own.
+    pub func start_import(self, sources: list[str]) -> unit!:
+        if let current = self.running:
+            if not current.finished():
+                error(busy, "an import is already running")
+            current.close()
+        self.running = importer.start(self.store, self.root, sources)
+
+    ## Whether an import is running.
+    pub func importing(self) -> bool:
+        if let current = self.running:
+            return not current.finished()
+        return false
+
+    ## The import's events since the last poll (importer.lucb lists them).
+    pub func poll_import(self) -> list[str]!:
+        let current = self.running else return []
+        let text = current.poll()
+        if text == "":
+            if current.finished():
+                current.close()
+                self.running = none
+            return []
+        return text.lines()
+
+    pub func cancel_import(self):
+        if let current = self.running:
+            current.cancel()
+
+    # mark: files ===============================================================================
+
+    ## The grid thumbnail and the viewer preview of photo `id`.
+    pub func thumb_path(self, id: int) -> str!:
+        return library.cached(self.root, "thumbs", id)
+
+    pub func preview_path(self, id: int) -> str!:
+        return library.cached(self.root, "previews", id)
+
+    ## The original file of the photo at `at` in the index.
+    pub func original_path(self, at: int) -> str!:
+        return paths.join(self.root, self.index.path(at))
+
+    # mark: marks ===============================================================================
+
+    ## Set `name` ("rating", "flag" or "label") to `value` on the photos at
+    ## `positions` of the index, in the catalog and in the index.
+    pub func set_marks(self, positions: list[int], name: str, value: int) -> unit!:
+        var ids: list[int] = []
+        for at in positions:
+            ids.append(self.index.id(at))
+        photo_index.set_marks(self.store, ids, name, value)
+        for at in positions:
+            match name:
+                "rating":
+                    self.index.set_rating(at, value)
+                "flag":
+                    self.index.set_flag(at, value)
+                _:
+                    self.index.set_label(at, value)
+
+    pub func close(self):
+        if let current = self.running:
+            current.close()
+        self.running = none
+        self.store.close()

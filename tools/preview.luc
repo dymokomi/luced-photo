@@ -1,0 +1,44 @@
+## Capture the window for tools/preview.py:
+##     preview OUTPUT.ppm LIBRARY [position [cell]]
+## Opens the library, selects the photo at `position`, waits for thumbnails and
+## the viewer's preview, then reads the frame back.
+import probe
+from app import LucedPhoto
+
+pub func main(arguments: list[str]) -> int!:
+    let photo = LucedPhoto(arguments[1])
+    let position = int(arguments[2]) if arguments.length > 2 else 0
+    let cell = float(arguments[3]) if arguments.length > 3 else 0.0
+    var ticks = 0
+    var capture = -1
+    let timer = photo.app.every(0.05, func () -> unit!:
+        ticks += 1
+        let grid = photo.panels.library_pane.grid
+        if ticks == 4:
+            if cell > 0.0:
+                grid.set_cell_size(cell)
+            if position < grid.item_count():
+                grid.select(position)
+                photo.panels.show_selection(position)
+        if ticks == 40 and capture < 0:
+            capture = 0
+        if ticks > 200:
+            photo.app.stop()
+        photo.panels.body.layout().invalidate())
+    # The frame after `begin` is the one read back; the next ends the run.
+    let observed = photo.app.on_frame(func (elapsed: float) -> unit!:
+        _ = elapsed
+        if capture == 0:
+            capture = 1
+            probe.begin("Luced Photo")
+            photo.panels.body.layout().invalidate()
+        elif capture == 1:
+            capture = 2
+            photo.app.stop())
+    photo.app.run()
+    observed.disconnect()
+    photo.app.cancel(timer)
+    probe.save(arguments[0])
+    probe.end()
+    photo.close()
+    return 0

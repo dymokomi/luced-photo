@@ -1,0 +1,20 @@
+## luced-photo's entry point: open the library and run the window.
+## `--library DIR` opens the bundle at DIR (default ~/Pictures/Luced Photo.library);
+## `--import PATH` imports a file or folder at start; `--smoke` draws three frames
+## and exits.
+from app import LucedPhoto
+from photo_library import default_root
+
+pub func main(arguments: list[str]) -> int!:
+    var root = ""
+    var sources: list[str] = []
+    for at in 0..<arguments.length - 1:
+        if arguments[at] == "--library":
+            root = arguments[at + 1]
+        elif arguments[at] == "--import":
+            sources.append(arguments[at + 1])
+    let photo = LucedPhoto(root if root != "" else default_root())
+    photo.panels.start_import(sources)
+    photo.run(arguments)
+    photo.close()
+    return 0

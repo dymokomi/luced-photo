@@ -1,0 +1,86 @@
+## The Viewer: the current photo, fitted to the pane on a dark backdrop. It shows
+## the library's 2048 px preview, decoded off the window's thread; the develop
+## pipeline takes over here once photos are developed (luce-develop's renderer).
+from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image, Panel
+from luce_gpu.gpu import RenderTarget, Rect
+from luce_window.input import Cursor
+from luce_std import math
+from thumbs import Loader
+import thumbs
+import library
+import theme
+
+pub class Viewer: Widget:
+    let box: Layout
+    let loader: Loader
+    pub let panel: Panel
+    var picture: Image? = none
+    ## The photo shown, and the one on its way (ids; -1 for none).
+    var shown: int = -1
+    var wanted: int = -1
+
+    pub func init(self) -> unit!:
+        self.box = Layout()
+        self.box.set_cursor(Cursor.arrow)
+        self.box.set_flex()
+        self.box.set_limits(Size(240.0, 200.0), Size(16384.0, 16384.0))
+        self.loader = thumbs.start(1, library.preview_edge)
+        self.panel = Panel("Viewer", self, minimum = Size(320.0, 240.0), closable = false, id = "viewer")
+
+    ## Show photo `id` from its preview file at `path`.
+    pub func show(self, id: int, path: str) -> unit!:
+        if id == self.shown or id == self.wanted:
+            return
+        self.wanted = id
+        self.loader.clear()
+        self.loader.request(id, path)
+
+    ## Show nothing.
+    pub func clear(self) -> unit!:
+        self.loader.clear()
+        self.wanted = -1
+        self.shown = -1
+        self.picture = none
+        self.box.invalidate()
+
+    ## Take in a finished preview; called on the window's timer.
+    pub func tick(self) -> unit!:
+        let id = self.loader.take()
+        if id < 0 or id != self.wanted:
+            return
+        let picture = Image(self.loader.taken_width(), self.loader.taken_height())
+        picture.write(self.loader.taken_pixels())
+        self.picture = picture
+        self.shown = id
+        self.wanted = -1
+        self.box.invalidate()
+
+    pub func layout(self) -> Layout:
+        return self.box
+
+    pub func measure(self, available: Constraints) -> Size!:
+        return Size(640.0, 480.0)
+
+    pub func draw(self, target: RenderTarget) -> unit!:
+        let painter = Painter(target)
+        let size = target.size()
+        painter.rectangle(Rect(0.0, 0.0, size.width, size.height), theme.viewer_backdrop())
+        let picture = self.picture else return
+        let margin = 16.0
+        let room_width = size.width - margin * 2.0
+        let room_height = size.height - margin * 2.0
+        if room_width <= 0.0 or room_height <= 0.0:
+            return
+        let width = float(picture.width())
+        let height = float(picture.height())
+        # Never past 1:1 of the preview; fitted otherwise.
+        let scale = math.min(1.0, math.min(room_width / width, room_height / height))
+        let shown_width = width * scale
+        let shown_height = height * scale
+        painter.image(picture, Rect((size.width - shown_width) * 0.5, (size.height - shown_height) * 0.5, shown_width, shown_height))
+
+    pub func event(self, event: Event) -> unit!:
+        return
+
+    pub func close(self):
+        self.loader.close()

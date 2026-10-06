@@ -1,0 +1,219 @@
+## The window: a toolbar over three docked panes — Library, Viewer and Properties —
+## with a status line below. The panels carry what happens between the panes:
+## picking photos in the grid shows the lead one in the viewer and its facts in
+## Properties; ratings, flags and labels act on the whole selection; an import's
+## progress shows in the status line while the grid fills in.
+from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
+from interop import Connection
+from luce_dialogs import dialogs
+from actions import Actions, label_number
+from photo_library import PhotoLibrary
+from library_pane import LibraryPane
+from viewer import Viewer
+from properties import PropertiesPane
+
+## How often the grid reloads the catalog while an import adds photos, in ticks.
+let reload_ticks: int = 20
+
+pub class Panels:
+    pub let body: VStack
+    pub let actions: Actions
+    pub let library: PhotoLibrary
+    pub let library_pane: LibraryPane
+    pub let viewer: Viewer
+    pub let properties: PropertiesPane
+    pub let dock: DStack
+    let status: Text
+    let palette: CommandPalette
+    var connections: list[Connection] = []
+    ## Ticks since the import last added photos the grid has not shown, or -1.
+    var unshown: int = -1
+    pub var app: Application? = none
+
+    pub func init(self, font: Font, root: str) -> unit!:
+        self.library = PhotoLibrary(root)
+        self.actions = Actions()
+        self.library_pane = LibraryPane(self.library, font)
+        self.viewer = Viewer()
+        self.properties = PropertiesPane(self.library, self.actions, font)
+        self.status = Text("", font = font, muted = true)
+        self.palette = CommandPalette(self.actions.all, font = font)
+        self.library_pane.on_pick = self.show_selection
+        self.bind_actions()
+        let actions = self.actions
+        let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
+                              Menu("Library", [actions.import_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
+                              Menu("Filter", self.library_pane.filters, font = font),
+                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next], font = font),
+                              Menu("Window", [actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
+        self.dock = DStack([self.viewer.panel], font = font)
+        self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.left)
+        self.dock.set_fraction(self.library_pane.panel, 0.34)
+        self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
+        self.dock.set_fraction(self.viewer.panel, 0.7)
+        self.dock.layout().set_flex()
+        let footer = HStack([self.status], padding = 6.0)
+        self.body = VStack([toolbar, self.dock, footer, self.palette], spacing = 0.0)
+        self.body.layout().set_flex()
+        self.actions.refresh(false)
+        let total = self.library.index.total()
+        self.tell("The library is empty: Library › Import Photos… or drop photos on the grid." if total == 0 else f"{total} photos in {root}")
+
+    func tool(self, font: Font, icon: str, command: Command) -> Button!:
+        let button = Button(icon = icon, font = font)
+        self.connections.append(button.on_click(func () -> unit!:
+            command.trigger()))
+        return button
+
+    func bind_actions(self) -> unit!:
+        let actions = self.actions
+        self.connections.append(actions.import_photos.on_trigger(self.choose_import))
+        self.connections.append(self.library_pane.grid.on_drop(self.import_dropped))
+        self.connections.append(actions.select_all.on_trigger(func () -> unit!:
+            self.library_pane.grid.select_all()
+            self.show_selection(self.library_pane.grid.selected_index())))
+        self.connections.append(actions.bigger.on_trigger(func () -> unit!:
+            self.library_pane.grid.set_cell_size(self.library_pane.grid.cell_size() * 1.25)))
+        self.connections.append(actions.smaller.on_trigger(func () -> unit!:
+            self.library_pane.grid.set_cell_size(self.library_pane.grid.cell_size() / 1.25)))
+        for (stars, command) in actions.ratings.indexed():
+            self.connections.append(command.on_trigger(func () -> unit!:
+                self.mark("rating", stars)))
+        self.connections.append(actions.pick.on_trigger(func () -> unit!:
+            self.mark("flag", 1)))
+        self.connections.append(actions.reject.on_trigger(func () -> unit!:
+            self.mark("flag", -1)))
+        self.connections.append(actions.unflag.on_trigger(func () -> unit!:
+            self.mark("flag", 0)))
+        for (at, command) in actions.labels.indexed():
+            let label = label_number(at)
+            self.connections.append(command.on_trigger(func () -> unit!:
+                self.mark("label", label)))
+        self.connections.append(actions.next.on_trigger(func () -> unit!:
+            self.step(1)))
+        self.connections.append(actions.previous.on_trigger(func () -> unit!:
+            self.step(-1)))
+        self.connections.append(actions.palette.on_trigger(func () -> unit!:
+            self.palette.open()))
+        self.connections.append(actions.quit.on_trigger(func () -> unit!:
+            if let app = self.app:
+                app.stop()))
+
+    # mark: importing ===========================================================================
+
+    func choose_import(self) -> unit!:
+        let chosen = dialogs.open_files("Choose photos to import") else return
+        self.start_import(chosen.lines())
+
+    func import_dropped(self) -> unit!:
+        let box = self.library_pane.grid.layout()
+        var dropped: list[str] = []
+        for at in 0..<box.drop_count():
+            dropped.append(box.drop_path(at))
+        self.start_import(dropped)
+
+    ## Import the files and folders at `sources`.
+    pub func start_import(self, sources: list[str]) -> unit!:
+        if sources.length == 0:
+            return
+        self.library.start_import(sources) catch failure:
+            self.tell(failure.message)
+            return
+        self.tell("Looking for photos…")
+
+    func take_import_events(self) -> unit!:
+        for line in self.library.poll_import():
+            let fields = line.split("\t")
+            match fields[0]:
+                "found":
+                    self.tell(f"Importing {fields[1]} files…")
+                "added":
+                    self.tell(f"Imported {fields[2]} of {fields[3]}: {fields[4]}")
+                    if self.unshown < 0:
+                        self.unshown = 0
+                "skipped":
+                    self.tell(f"Already in the library: {fields[1]}")
+                "failed":
+                    self.tell(f"Not imported: {fields[1]}: {fields[2]}")
+                "done":
+                    self.show_new_photos()
+                    let skipped = f", {fields[2]} already in the library" if fields[2] != "0" else ""
+                    let failed = f", {fields[3]} not imported" if fields[3] != "0" else ""
+                    self.tell(f"Imported {fields[1]} photos{skipped}{failed}.")
+                "error":
+                    self.tell(f"The import stopped: {fields[1]}")
+                _:
+                    continue
+        # New photos show a few at a time while the import goes on.
+        if self.unshown >= 0:
+            self.unshown += 1
+            if self.unshown >= reload_ticks:
+                self.show_new_photos()
+
+    ## Read the catalog again and show it, keeping the lead photo selected.
+    func show_new_photos(self) -> unit!:
+        self.unshown = -1
+        let grid = self.library_pane.grid
+        let lead = grid.selected_index()
+        let lead_id = self.library.index.id(lead) if lead >= 0 else -1
+        self.library.reload()
+        self.library_pane.refresh()
+        if lead_id >= 0:
+            let at = self.library.index.position_of(lead_id)
+            if at >= 0:
+                grid.select(at)
+
+    # mark: the selection =======================================================================
+
+    ## Show the photo at `lead` (-1 none) in the viewer and Properties.
+    pub func show_selection(self, lead: int) -> unit!:
+        let selected = self.library_pane.grid.selected_count()
+        self.actions.refresh(lead >= 0)
+        self.properties.show(lead, selected)
+        if lead < 0:
+            self.viewer.clear()
+            return
+        let id = self.library.index.id(lead)
+        self.viewer.show(id, self.library.preview_path(id))
+
+    ## Move the lead `direction` photos on, selecting it alone.
+    func step(self, direction: int) -> unit!:
+        let grid = self.library_pane.grid
+        let count = grid.item_count()
+        if count == 0:
+            return
+        let lead = grid.selected_index()
+        var target = lead + direction if lead >= 0 else 0
+        target = 0 if target < 0 else (count - 1 if target >= count else target)
+        grid.select(target)
+        self.show_selection(target)
+
+    ## Set `name` to `value` on every selected photo.
+    func mark(self, name: str, value: int) -> unit!:
+        let picked = self.library_pane.selection()
+        if picked.length == 0:
+            return
+        self.library.set_marks(picked, name, value)
+        self.library_pane.refresh_badges(picked)
+        self.properties.show(self.library_pane.grid.selected_index(), picked.length)
+
+    # mark: the timer ===========================================================================
+
+    ## Take in thumbnails, the viewer's preview and the import's progress; called
+    ## on the window's timer.
+    pub func poll(self) -> unit!:
+        self.library_pane.tick()
+        self.viewer.tick()
+        self.take_import_events()
+
+    pub func tell(self, text: str) -> unit!:
+        self.status.set_text(text)
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
+        self.library_pane.close()
+        self.viewer.close()
+        self.properties.close()
+        self.library.close()

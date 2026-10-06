@@ -1,0 +1,60 @@
+## The library bundle on disk:
+##
+##     <root>/library.prism            the catalog (catalog.lucb)
+##     <root>/originals/YYYY/MM/DD/    imported files, by capture date
+##     <root>/cache/thumbs/<id>.jpg    512 px thumbnails for the grid
+##     <root>/cache/previews/<id>.jpg  2048 px previews for the viewer
+##
+## Everything under cache/ can be made again from the originals.
+import c
+import strings
+from luce_std import files
+from luce_std import paths
+import interop
+from records import Buffer
+
+## The longer side of a grid thumbnail and of a viewer preview, in pixels.
+pub let thumb_edge: i64 = 512
+pub let preview_edge: i64 = 2048
+
+## `root`/`relative`, onto `out`.
+pub func join_into(root: str, relative: str, out: Buffer*) -> !:
+    out.clear()
+    try out.text(root)
+    if root.length > 0 and root.bytes[root.length - 1] != '/':
+        try out.byte('/')
+    try out.text(relative)
+
+## The thumbnail (`kind` "thumbs") or preview ("previews") file of photo `id`, onto `out`.
+pub func cache_path(root: str, kind: str, id: i64, out: Buffer*) -> !:
+    try join_into(root, "cache/", out)
+    try out.text(kind)
+    try out.byte('/')
+    try out.number(id)
+    try out.put(b".jpg")
+
+## Make the bundle's folders when they are missing.
+pub func ensure(root: str) -> !:
+    var path: Buffer
+    defer path.close()
+    for relative in ["originals", "cache/thumbs", "cache/previews"]:
+        try join_into(root, relative, &path)
+        try files.ensure_directory(path.text_view())
+
+## The catalog file of the bundle at `root`, for Luce.
+pub func catalog_path(root: str) -> interop.Owned[str]!:
+    return try paths.join(root, "library.prism")
+
+## Photo `id`'s thumbnail (`kind` "thumbs") or preview ("previews") file, for Luce.
+pub func cached(root: str, kind: str, id: i64) -> interop.Owned[str]!:
+    var path: Buffer
+    defer path.close()
+    try cache_path(root, kind, id, &path)
+    return try interop.copy_text(path.text_view())
+
+## Whether a file exists at `path`.
+pub func exists(path: str) -> bool:
+    let terminated = strings.copy(path) catch failure:
+        return false
+    defer strings.release(terminated)
+    return files.exists((c.str)terminated)

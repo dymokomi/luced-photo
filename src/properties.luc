@@ -1,0 +1,97 @@
+## The Properties pane: one long column about the selected photo. For now it
+## holds what the camera recorded and the photo's marks (stars, flag, label);
+## the develop's sections (white balance, tone, curves, color…) join it as
+## luce-develop grows. Every control acts on the whole selection.
+from luce_ui.ui import VStack, HStack, Text, Button, Font, Panel, Size, ScrollView, Spacer, Rule, Command, Widget
+from interop import Connection
+from photo_library import PhotoLibrary
+from actions import Actions
+
+pub class PropertiesPane:
+    pub let panel: Panel
+    let library: PhotoLibrary
+    let title: Text
+    let camera: Text
+    let lens: Text
+    let exposure: Text
+    let captured: Text
+    let file: Text
+    let marks: Text
+    var connections: list[Connection] = []
+
+    pub func init(self, photos: PhotoLibrary, actions: Actions, font: Font) -> unit!:
+        self.library = photos
+        self.title = Text("No photo selected", font = font)
+        self.camera = Text("", font = font, muted = true)
+        self.lens = Text("", font = font, muted = true)
+        self.exposure = Text("", font = font, muted = true)
+        self.captured = Text("", font = font, muted = true)
+        self.file = Text("", font = font, muted = true)
+        self.marks = Text("", font = font)
+        var stars: list[Widget] = []
+        for command in actions.ratings:
+            stars.append(self.command_button(command, "0" if stars.length == 0 else f"{stars.length}★", font))
+        let flags = HStack([self.icon_button(actions.pick, "flag", font), self.icon_button(actions.reject, "close", font),
+                            self.command_button(actions.unflag, "Unflag", font)], spacing = 4.0)
+        var labels: list[Widget] = []
+        for (at, command) in actions.labels.indexed():
+            labels.append(self.command_button(command, ["Red", "Yellow", "Green", "Blue", "None"][at], font))
+        let rows = VStack([self.title, self.captured, Rule(), Text("CAMERA", font = font, muted = true), self.camera, self.lens,
+                           self.exposure, self.file, Rule(), Text("MARKS", font = font, muted = true), self.marks,
+                           HStack(stars, spacing = 4.0), flags, HStack(labels, spacing = 4.0), Spacer()], spacing = 6.0, padding = 10.0)
+        self.panel = Panel("Properties", ScrollView(rows), minimum = Size(260.0, 200.0), closable = false, id = "properties")
+
+    func command_button(self, command: Command, text: str, font: Font) -> Button!:
+        let button = Button(text, font = font)
+        self.connections.append(button.on_click(func () -> unit!:
+            command.trigger()))
+        return button
+
+    func icon_button(self, command: Command, icon: str, font: Font) -> Button!:
+        let button = Button(icon = icon, font = font)
+        self.connections.append(button.on_click(func () -> unit!:
+            command.trigger()))
+        return button
+
+    ## Show the photo at `at` of the library's index (-1 for none), and how many
+    ## photos are selected.
+    pub func show(self, at: int, selected: int) -> unit!:
+        if at < 0:
+            self.title.set_text("No photo selected")
+            for line in [self.camera, self.lens, self.exposure, self.captured, self.file, self.marks]:
+                line.set_text("")
+            return
+        let index = self.library.index
+        self.title.set_text(index.name(at) if selected <= 1 else f"{index.name(at)} and {selected - 1} more")
+        self.captured.set_text(index.captured(at).replace("T", "  "))
+        let make = index.make(at)
+        let model = index.model(at)
+        self.camera.set_text(model if model.starts_with(make) else f"{make} {model}".trim())
+        self.lens.set_text(index.lens(at))
+        var parts: list[str] = []
+        if index.shutter(at) != "":
+            parts.append(index.shutter(at))
+        if index.aperture(at) > 0.0:
+            parts.append(f"f/{decimal(index.aperture(at))}")
+        if index.iso(at) > 0:
+            parts.append(f"ISO {index.iso(at)}")
+        if index.focal(at) > 0.0:
+            parts.append(f"{decimal(index.focal(at))} mm")
+        self.exposure.set_text(parts.join("  "))
+        self.file.set_text(f"{index.kind(at)}  {index.width(at)}×{index.height(at)}  {megabytes(index.bytes(at))} MB")
+        let flag = ["Rejected", "", "Picked"][index.flag(at) + 1]
+        let stars = "★".repeat(index.rating(at)) if index.rating(at) > 0 else "No rating"
+        self.marks.set_text(f"{stars}  {flag}".trim())
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
+
+## `value` with one decimal, or none when it is whole: 2.8, 35.
+func decimal(value: float) -> str:
+    let tenths = int(value * 10.0 + 0.5)
+    return f"{tenths // 10}" if tenths % 10 == 0 else f"{tenths // 10}.{tenths % 10}"
+
+func megabytes(count: int) -> str:
+    return decimal(float(count) / 1048576.0)

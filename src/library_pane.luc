@@ -1,0 +1,157 @@
+## The Library pane: the grid of thumbnails, and its bar below with the filter,
+## the count and the thumbnail size. Thumbnails stream in from the loader's
+## threads for the cells on screen and a few rows around them; pictures far
+## from the screen are let go, so a library of any size costs a screenful.
+from luce_ui.ui import ThumbnailGrid, Image, Slider, Text, HStack, Spacer, Menu, Command, Font, Panel, Size
+from interop import Connection
+from photo_library import PhotoLibrary
+from thumbs import Loader
+import thumbs
+import library
+
+pub class LibraryPane:
+    pub let panel: Panel
+    pub let grid: ThumbnailGrid
+    let library: PhotoLibrary
+    let loader: Loader
+    let count: Text
+    let size: Slider
+    ## Grid items whose thumbnails were asked for and have not arrived.
+    var requested: set[int] = {}
+    ## The pictures loaded, by photo id: they outlive a refresh, which may move
+    ## photos to other positions (an import adds photos among them).
+    var pictures: map[int, Image] = {}
+    ## The range of items thumbnails are kept for, as last arranged.
+    var kept_first: int = -1
+    var kept_last: int = -1
+    var connections: list[Connection] = []
+    ## The filter commands, for the Filter menu.
+    pub let filters: list[Command]
+    ## Called with the lead item when the selection changes, and on a double-click.
+    pub var on_pick: func(int) -> unit!? = none
+    pub var on_open: func(int) -> unit!? = none
+
+    pub func init(self, photos: PhotoLibrary, font: Font) -> unit!:
+        self.library = photos
+        self.loader = thumbs.start(3, library.thumb_edge)
+        self.grid = ThumbnailGrid(photos.index.count(), 160.0)
+        self.count = Text("", font = font, muted = true)
+        self.size = Slider("", 64.0, 480.0, 160.0, font = font, show_value = false)
+        self.size.layout().set_limits(Size(90.0, 0.0), Size(140.0, 16384.0))
+        self.filters = [Command("All Photos", id = "filter_all"), Command("Picked", id = "filter_picked"),
+                        Command("Rejected", id = "filter_rejected"), Command("Hide Rejected", id = "filter_unrejected"),
+                        Command("★ and Above", id = "filter_1"), Command("★★★ and Above", id = "filter_3"),
+                        Command("★★★★★", id = "filter_5")]
+        let settings = [(0, 0), (0, 1), (0, -1), (0, 2), (1, 2), (3, 2), (5, 2)]
+        for (at, command) in self.filters.indexed():
+            let (stars, flags) = settings[at]
+            self.connections.append(command.on_trigger(func () -> unit!:
+                self.library.set_filter(stars, flags, 0)
+                self.refresh()))
+        self.connections.append(self.size.on_change(func (value: float) -> unit!:
+            self.grid.set_cell_size(value)))
+        self.connections.append(self.grid.on_resize(func (cell: int) -> unit!:
+            self.size.set_value(float(cell))))
+        self.connections.append(self.grid.on_select(func (lead: int) -> unit!:
+            if let pick = self.on_pick:
+                pick(lead)))
+        self.connections.append(self.grid.on_activate(func (lead: int) -> unit!:
+            if let open = self.on_open:
+                open(lead)))
+        let bar = HStack([Menu("Filter", self.filters, font = font), Spacer(), self.count, self.size], spacing = 6.0, padding = 4.0)
+        self.panel = Panel("Library", self.grid, minimum = Size(240.0, 200.0), closable = false, footer = bar, id = "library")
+        self.refresh()
+
+    ## Show the library's index afresh. Positions may now name other photos, so
+    ## requests in flight are dropped and loaded pictures move with their photos.
+    pub func refresh(self) -> unit!:
+        self.loader.clear()
+        self.requested = {}
+        self.kept_first = -1
+        self.kept_last = -1
+        self.grid.keep_images(0, 0)
+        let index = self.library.index
+        self.grid.set_count(index.count())
+        for at in 0..<index.count():
+            self.grid.set_badges(at, index.rating(at), index.flag(at), index.label(at), index.edited(at))
+            if let picture = self.pictures[index.id(at)]:
+                self.grid.set_image(at, picture)
+        let total = index.total()
+        let shown = index.count()
+        self.count.set_text(f"{shown} photos" if shown == total else f"{shown} of {total} photos")
+
+    ## Redraw the badges of the items at `positions`.
+    pub func refresh_badges(self, positions: list[int]) -> unit!:
+        let index = self.library.index
+        for at in positions:
+            self.grid.set_badges(at, index.rating(at), index.flag(at), index.label(at), index.edited(at))
+
+    ## The selected items, the lead among them.
+    pub func selection(self) -> list[int]:
+        var picked: list[int] = []
+        for at in 0..<self.grid.item_count():
+            if self.grid.is_selected(at):
+                picked.append(at)
+        return picked
+
+    ## Take in finished thumbnails and ask for the ones now on screen; called on
+    ## the window's timer.
+    pub func tick(self) -> unit!:
+        var at = self.loader.take()
+        while at >= 0:
+            if at < self.grid.item_count():
+                let picture = Image(self.loader.taken_width(), self.loader.taken_height())
+                picture.write(self.loader.taken_pixels())
+                self.grid.set_image(at, picture)
+                self.pictures[self.library.index.id(at)] = picture
+            _ = self.requested.remove(at)
+            at = self.loader.take()
+        let first = self.grid.first_visible()
+        let last = self.grid.last_visible()
+        if last <= first:
+            return
+        # A few rows either side load ahead of scrolling.
+        let margin = self.grid.columns() * 3
+        let low = first - margin if first > margin else 0
+        let high = last + margin if last + margin < self.grid.item_count() else self.grid.item_count()
+        if low != self.kept_first or high != self.kept_last:
+            self.kept_first = low
+            self.kept_last = high
+            self.loader.keep(low, high)
+            # Pictures stay a little longer than requests, so scrolling back is instant.
+            let keep_low = low - margin * 2 if low > margin * 2 else 0
+            let keep_high = high + margin * 2 if high + margin * 2 < self.grid.item_count() else self.grid.item_count()
+            self.grid.keep_images(keep_low, keep_high)
+            var kept: map[int, Image] = {}
+            for position in keep_low..<keep_high:
+                let id = self.library.index.id(position)
+                if let picture = self.pictures[id]:
+                    kept[id] = picture
+            self.pictures = kept
+            var still: set[int] = {}
+            for wanted in self.requested:
+                if wanted >= low and wanted < high:
+                    still.insert(wanted)
+            self.requested = still
+        # The loader serves its newest requests first: ask for the rows around
+        # the screen, then the screen from the bottom up, so its top comes first.
+        for item in low..<first:
+            self.request(item)
+        for item in last..<high:
+            self.request(item)
+        var item = last - 1
+        while item >= first:
+            self.request(item)
+            item -= 1
+
+    func request(self, item: int) -> unit!:
+        if self.grid.has_image(item) or item in self.requested:
+            return
+        self.requested.insert(item)
+        self.loader.request(item, self.library.thumb_path(self.library.index.id(item)))
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
+        self.loader.close()

@@ -1,0 +1,202 @@
+## The library as the window sees it: every photo row read from the catalog once,
+## in Base, and the order and filter the grid shows them in, with one accessor per
+## field for Luce. Marks written through `set_marks` change the catalog and the
+## caller updates the index with `set_rating`, `set_flag` and `set_label`.
+import interop
+import memory
+from luce_prism import prism
+import catalog
+from catalog import Photo
+from records import Records
+
+pub struct PhotoIndex:
+    var rows: catalog.Rows
+    ## Positions of `rows.photos` in display order, after the filter.
+    var order: Records[u32]
+    ## The filter: the fewest stars shown; which flags (0 every photo, 1 picked
+    ## only, -1 rejected only, 2 all but rejected); a label (0 any).
+    var minimum_rating: i64
+    var flags: i64
+    var wanted_label: i64
+
+    ## How many photos the filter shows.
+    pub func count() -> i64:
+        return (i64)self.order.length()
+
+    ## How many photos the library holds.
+    pub func total() -> i64:
+        return (i64)self.rows.photos.length()
+
+    ## The next id an import will give.
+    pub func next_id() -> i64:
+        return self.rows.next
+
+    func photo(at: i64) -> Photo:
+        if at < 0 or at >= (i64)self.order.length():
+            trap("no photo at that position in the library")
+        return self.rows.photos.at((usize)self.order.at((usize)at))
+
+    func stored(at: i64) -> Photo*:
+        if at < 0 or at >= (i64)self.order.length():
+            trap("no photo at that position in the library")
+        return &self.rows.photos.items()[(usize)self.order.at((usize)at)]
+
+    pub func id(at: i64) -> i64:
+        return self.photo(at).id
+    pub func path(at: i64) -> str:
+        return self.photo(at).path
+    pub func name(at: i64) -> str:
+        return self.photo(at).name
+    pub func kind(at: i64) -> str:
+        return self.photo(at).kind
+    pub func bytes(at: i64) -> i64:
+        return self.photo(at).bytes
+    pub func captured(at: i64) -> str:
+        return self.photo(at).captured
+    pub func captured_unix(at: i64) -> i64:
+        return self.photo(at).captured_unix
+    pub func offset(at: i64) -> str:
+        return self.photo(at).offset
+    pub func width(at: i64) -> i64:
+        return self.photo(at).width
+    pub func height(at: i64) -> i64:
+        return self.photo(at).height
+    pub func orientation(at: i64) -> i64:
+        return self.photo(at).orientation
+    pub func make(at: i64) -> str:
+        return self.photo(at).make
+    pub func model(at: i64) -> str:
+        return self.photo(at).model
+    pub func lens(at: i64) -> str:
+        return self.photo(at).lens
+    pub func focal(at: i64) -> f64:
+        return self.photo(at).focal
+    pub func aperture(at: i64) -> f64:
+        return self.photo(at).aperture
+    pub func exposure(at: i64) -> f64:
+        return self.photo(at).exposure
+    pub func shutter(at: i64) -> str:
+        return self.photo(at).shutter
+    pub func iso(at: i64) -> i64:
+        return self.photo(at).iso
+    pub func bias(at: i64) -> f64:
+        return self.photo(at).bias
+    pub func rating(at: i64) -> i64:
+        return self.photo(at).rating
+    pub func flag(at: i64) -> i64:
+        return self.photo(at).flag
+    pub func label(at: i64) -> i64:
+        return self.photo(at).label
+    pub func edited(at: i64) -> bool:
+        return self.photo(at).edited
+
+    ## The position of photo `id` under the filter, or -1.
+    pub func position_of(id: i64) -> i64:
+        for (at, position) in self.order.view().indexed():
+            if self.rows.photos.at((usize)position).id == id:
+                return (i64)at
+        return -1
+
+    pub func set_rating(at: i64, rating: i64):
+        self.stored(at).rating = rating
+    pub func set_flag(at: i64, flag: i64):
+        self.stored(at).flag = flag
+    pub func set_label(at: i64, label: i64):
+        self.stored(at).label = label
+
+    ## Show only photos with at least `minimum_rating` stars, the flags `flags`
+    ## selects (0 every photo, 1 picked, -1 rejected, 2 all but rejected) and label
+    ## `label` (0 any), ordered by capture time.
+    pub func filter(minimum_rating: i64, flags: i64, label: i64) -> !:
+        self.minimum_rating = minimum_rating
+        self.flags = flags
+        self.wanted_label = label
+        try self.arrange()
+
+    func arrange() -> !:
+        self.order.clear()
+        for (at, photo) in self.rows.photos.view().indexed():
+            if photo.rating < self.minimum_rating:
+                continue
+            if (self.flags == 1 and photo.flag != 1) or (self.flags == -1 and photo.flag != -1) or (self.flags == 2 and photo.flag == -1):
+                continue
+            if self.wanted_label != 0 and photo.label != self.wanted_label:
+                continue
+            try self.order.add((u32)at)
+        try sort_by_capture(self.order.items(), self.rows.photos.view())
+
+    pub func close():
+        self.rows.close()
+        self.order.close()
+
+pub let photo_index_type: interop.Type[PhotoIndex] = interop.Type[PhotoIndex]("PhotoIndex", PhotoIndex.close, closeable = true)
+
+## Whether photo `a` comes before photo `b`: by capture time, then by id.
+func before(a: const Photo*, b: const Photo*) -> bool:
+    if a.captured_unix != b.captured_unix:
+        return a.captured_unix < b.captured_unix
+    return a.id < b.id
+
+## Sort `positions` of `photos` by capture time: a stable merge sort.
+func sort_by_capture(positions: u32[], photos: const Photo[]) -> !:
+    if positions.length < 2:
+        return
+    let scratch = try new u32[positions.length] --- in memory.heap
+    defer free(scratch) in memory.heap
+    var width: usize = 1
+    var source = positions
+    var target = scratch
+    while width < positions.length:
+        var low: usize = 0
+        while low < positions.length:
+            let middle = low + width if low + width < positions.length else positions.length
+            let high = low + 2 * width if low + 2 * width < positions.length else positions.length
+            var left = low
+            var right = middle
+            var out = low
+            while out < high:
+                if left < middle and (right >= high or not before(&photos[source[right]], &photos[source[left]])):
+                    target[out] = source[left]
+                    left += 1
+                else:
+                    target[out] = source[right]
+                    right += 1
+                out += 1
+            low = high
+        let swap = source
+        source = target
+        target = swap
+        width *= 2
+    if source.data != positions.data:
+        memory.copy(positions, source, positions.length)
+
+## The catalog of `store` as an index Luce holds, every photo shown.
+pub func read_index(store: interop.Reference[prism.Store]) -> interop.Reference[PhotoIndex]!:
+    var rows = try catalog.read(try store.get())
+    errdefer rows.close()
+    let index = try new PhotoIndex(rows = rows, flags = 0) in memory.heap
+    errdefer free(index) in memory.heap
+    try index.arrange()
+    return try interop.Reference[PhotoIndex].adopt(index, photo_index_type, memory.heap)
+
+## Set field `name` ("rating", "flag" or "label") to `value` on photos `ids` in
+## the catalog, in one commit.
+pub func set_marks(store: interop.Reference[prism.Store], ids: const i64[], name: str, value: i64) -> !:
+    if not (name == "rating" or name == "flag" or name == "label"):
+        error(prism.invalid, "only a rating, flag or label is set this way")
+    let held = try store.get()
+    var batch = try catalog.Batch.begin(held)
+    defer batch.close()
+    for id in ids:
+        try batch.set_mark(id, name, value)
+    try batch.commit()
+
+test "photos sort by capture time, then id":
+    var photos: Photo[4]
+    photos[0] = Photo(id = 1, captured_unix = 30)
+    photos[1] = Photo(id = 2, captured_unix = 10)
+    photos[2] = Photo(id = 3, captured_unix = 30)
+    photos[3] = Photo(id = 4, captured_unix = 20)
+    var positions: u32[4] = [0, 1, 2, 3]
+    try sort_by_capture(positions, photos)
+    assert(positions[0] == 1 and positions[1] == 3 and positions[2] == 0 and positions[3] == 2)

@@ -1,0 +1,44 @@
+## Import the files named on the command line into a fresh library at the first
+## argument, twice: the second import must skip every photo. Prints the events and
+## the catalog it leaves.
+import interop
+import thread
+from luce_prism import prism
+import importer
+import photo_index
+import library
+
+func run_import(store: interop.Reference[prism.Store], root: str, files: const str[]) -> !:
+    let running = try importer.start(store, root, files)
+    defer running.release()
+    let held = try running.get()
+    while true:
+        let finished = held.finished()
+        let events = try held.poll()
+        if events.length > 0:
+            print(events)
+        if finished:
+            break
+        thread.sleep(20)
+    held.close()
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length < 3:
+        print("usage: import_check LIBRARY FILE...")
+        return 2
+    let root = arguments[1]
+    try library.ensure(root)
+    let catalog_path = try library.catalog_path(root)
+    defer catalog_path.release()
+    let store = try prism.Store.open(catalog_path.value)
+    defer store.release()
+    try run_import(store, root, arguments[2..])
+    try run_import(store, root, arguments[2..])
+    let index = try photo_index.read_index(store)
+    defer index.release()
+    let shown = try index.get()
+    print(f"{shown.count()} photos")
+    for at in 0..<shown.count():
+        print(f"{shown.id(at)}  {shown.path(at)}  {shown.kind(at)}  {shown.captured(at)}  {shown.width(at)}x{shown.height(at)}")
+    (try store.get()).close()
+    return 0

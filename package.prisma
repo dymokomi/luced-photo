@@ -1,0 +1,75 @@
+#prisma 4.0
+def package "luced-photo" {
+    str owner = "dymokomi"
+    str version = "0.1.0"
+    str kind = "application"
+    str language = "luce"
+    str description = "A photo library and RAW editor written in Luce: a scalable grid of your photos, a viewer with the develop applied and one long column of corrections, over a managed library kept in luce-prism."
+    str readme = "README.md"
+    str entry = "src/main.luc"
+
+    def application "bundle" {
+        str name = "Luced Photo"
+        str identifier = "com.luciaos.luced-photo"
+    }
+
+    def dependency "luce-ui" {
+        str owner = "dymokomi"
+        str path = "../luce-ui"
+    }
+
+    def dependency "luce-develop" {
+        str owner = "dymokomi"
+        str path = "../luce-develop"
+    }
+
+    def dependency "luce-prism" {
+        str owner = "dymokomi"
+        str path = "../luce-prism"
+    }
+
+    def dependency "luce-raw" {
+        str owner = "dymokomi"
+        str path = "../luce-raw"
+    }
+
+    def dependency "luce-jpeg" {
+        str owner = "dymokomi"
+        str path = "../luce-jpeg"
+    }
+
+    def dependency "luce-crypto" {
+        str owner = "dymokomi"
+        str path = "../luce-crypto"
+    }
+
+    def dependency "luce-config" {
+        str owner = "dymokomi"
+        str path = "../luce-config"
+    }
+
+    def dependency "luce-color" {
+        str owner = "dymokomi"
+        str path = "../luce-color"
+    }
+
+    def dependency "luce-dialogs" {
+        str owner = "dymokomi"
+        str path = "../luce-dialogs"
+    }
+
+    def dependency "luce-std" {
+        str owner = "dymokomi"
+        str path = "../luce-std"
+    }
+
+    def dependency "luce-gpu" {
+        str owner = "dymokomi"
+        str path = "../luce-gpu"
+    }
+
+    def dependency "luce-window" {
+        str owner = "dymokomi"
+        str path = "../luce-window"
+    }
+}

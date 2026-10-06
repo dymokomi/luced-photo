@@ -1,0 +1,187 @@
+## The thumbnail loader: decodes the grid's thumbnail files on worker threads, so
+## scrolling a large library never waits on a disk or a JPEG. The window asks for
+## the cells it shows (`request`), drops what scrolled away (`keep`), and takes
+## finished pictures one at a time on its timer (`take`, then `taken_*`).
+## Requests are served newest first: what the user just scrolled to comes first.
+import c
+import interop
+import memory
+import strings
+import sync
+import thread
+from luce_std import files
+from luce_develop import source
+from luce_develop.picture import Picture
+from records import Records
+
+## The most decoding threads a loader runs.
+let most_workers: usize = 8
+
+struct Request:
+    var index: i64
+    var generation: u64
+    ## A NUL-terminated heap copy (strings.copy).
+    var path: str
+
+struct Finished:
+    var index: i64
+    var generation: u64
+    var picture: Picture
+
+## What the window and the workers share, guarded by `lock`.
+struct Shared:
+    var lock: sync.Mutex
+    var ready: sync.Condition
+    var pending: Records[Request]
+    var finished: Records[Finished]
+    var generation: u64
+    var stopping: bool
+    ## Pixels decoded at most this long on their longer side.
+    var edge: usize
+
+    func close():
+        for request in self.pending.view():
+            strings.release(request.path)
+        self.pending.close()
+        for done in self.finished.view():
+            var picture = done.picture
+            picture.close()
+        self.finished.close()
+
+## A worker: take the newest request, decode it, hand the picture back.
+func work(context: void*?):
+    let shared = (Shared*)(context else return)
+    while true:
+        shared.lock.lock()
+        while shared.pending.length() == 0 and not shared.stopping:
+            shared.ready.wait(&shared.lock)
+        if shared.stopping:
+            shared.lock.unlock()
+            return
+        let request = shared.pending.at(shared.pending.length() - 1)
+        shared.pending.remove(shared.pending.length() - 1)
+        let edge = shared.edge
+        shared.lock.unlock()
+        let decoded = load(request.path, edge) catch failure:
+            strings.release(request.path)
+            continue
+        strings.release(request.path)
+        shared.lock.lock()
+        if request.generation == shared.generation:
+            shared.finished.add(Finished(index = request.index, generation = request.generation, picture = decoded)) catch failure:
+                var dropped = decoded
+                dropped.close()
+        else:
+            var stale = decoded
+            stale.close()
+        shared.lock.unlock()
+
+func load(path: str, edge: usize) -> Picture!:
+    let data = try files.read((c.str)path)
+    defer data.release()
+    return try source.preview(data.value, edge, 1)
+
+pub struct Loader:
+    var shared: Shared*?
+    var workers: thread.Handle[8]
+    var count: usize
+    ## The picture `take` last handed out.
+    var taken: Picture
+    var taken_index: i64
+
+    ## Ask for the thumbnail of grid item `index` from the file at `path`.
+    pub func request(index: i64, path: str) -> !:
+        let shared = self.shared else return
+        let copied = try strings.copy(path)
+        shared.lock.lock()
+        shared.pending.add(Request(index = index, generation = shared.generation, path = copied)) catch failure:
+            shared.lock.unlock()
+            strings.release(copied)
+            error(failure.code, failure.message)
+        shared.lock.unlock()
+        shared.ready.signal()
+
+    ## Forget requests for items outside `first..<last`.
+    pub func keep(first: i64, last: i64):
+        let shared = self.shared else return
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        var at: usize = 0
+        while at < shared.pending.length():
+            let request = shared.pending.at(at)
+            if request.index < first or request.index >= last:
+                strings.release(request.path)
+                shared.pending.remove(at)
+            else:
+                at += 1
+
+    ## Forget every request and every finished picture: the grid's items changed.
+    pub func clear():
+        let shared = self.shared else return
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        shared.generation += 1
+        for request in shared.pending.view():
+            strings.release(request.path)
+        shared.pending.clear()
+        for done in shared.finished.view():
+            var picture = done.picture
+            picture.close()
+        shared.finished.clear()
+
+    ## Take the next finished picture: its grid item, or -1 when none is ready.
+    ## Read it with `taken_width`, `taken_height` and `taken_pixels` until the
+    ## next take.
+    pub func take() -> i64:
+        let shared = self.shared else return -1
+        self.taken.close()
+        self.taken_index = -1
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        if shared.finished.length() == 0:
+            return -1
+        let done = shared.finished.at(0)
+        shared.finished.remove(0)
+        self.taken = done.picture
+        self.taken_index = done.index
+        return done.index
+
+    pub func taken_width() -> i64:
+        return self.taken.width()
+
+    pub func taken_height() -> i64:
+        return self.taken.height()
+
+    pub func taken_pixels() -> const u8[]:
+        return self.taken.pixels()
+
+    ## Stop the workers and wait for them.
+    pub func close():
+        let shared = self.shared else return
+        shared.lock.lock()
+        shared.stopping = true
+        shared.lock.unlock()
+        shared.ready.broadcast()
+        for at in 0..<self.count:
+            self.workers[at].join() catch failure:
+                trap("a thumbnail thread could not be joined")
+        shared.close()
+        free(shared) in memory.heap
+        self.shared = none
+        self.taken.close()
+
+pub let loader_type: interop.Type[Loader] = interop.Type[Loader]("Thumbnail loader", Loader.close, closeable = true, main_thread = true)
+
+## A loader decoding pictures up to `edge` pixels on `workers` threads (1–8).
+pub func start(workers: i64, edge: i64) -> interop.Reference[Loader]!:
+    if workers < 1 or workers > (i64)most_workers or edge < 16:
+        error(source.invalid, "a thumbnail loader runs 1 to 8 threads at 16 pixels or more")
+    let shared = try new Shared in memory.heap
+    shared.edge = (usize)edge
+    var loader = Loader(shared = shared, taken_index = -1)
+    errdefer loader.close()
+    for at in 0..<(usize)workers:
+        loader.workers[at] = try thread.spawn(work, (void*)shared, name = "luced-photo thumbs")
+        loader.count += 1
+    let stored = try new Loader(shared = loader.shared, workers = loader.workers, count = loader.count, taken_index = -1) in memory.heap
+    return try interop.Reference[Loader].adopt(stored, loader_type, memory.heap)

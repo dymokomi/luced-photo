@@ -1,0 +1,79 @@
+## What the importer learns about a photo before it is stored: its name and kind,
+## and the camera's metadata — capture time, camera, lens, exposure, size and
+## orientation. A photo with no capture time keeps its file's modification time.
+import c
+import strings
+from luce_std import files
+from luce_std import paths
+from luce_develop import source
+from catalog import Photo
+from records import Pool
+
+## Fill `photo`'s name, kind and metadata for the file at `path` holding `data`;
+## its text is kept in `pool`.
+pub func describe(path: str, data: const u8[], found: source.Kind, photo: Photo*, pool: Pool*) -> !:
+    photo.name = try pool.keep_text(paths.base(path).bytes)
+    photo.kind = source.kind_name(found)
+    photo.bytes = (i64)data.length
+    photo.orientation = 1
+    if photo.captured_unix == 0:
+        let terminated = try strings.copy(path)
+        defer strings.release(terminated)
+        let stat = try files.metadata((c.str)terminated)
+        photo.captured_unix = stat.modified.seconds
+    if photo.captured.length == 0:
+        var text: u8[19]
+        civil_text(photo.captured_unix, text)
+        photo.captured = try pool.keep_text(text)
+
+## `seconds` since 1970 as "YYYY-MM-DDTHH:MM:SS" in `out`.
+pub func civil_text(seconds: i64, out: u8[]):
+    let days = floor_div(seconds, 86400)
+    let rest = seconds - days * 86400
+    let (year, month, day) = civil_from_days(days)
+    put_digits(out[0..<4], year)
+    out[4] = '-'
+    put_digits(out[5..<7], month)
+    out[7] = '-'
+    put_digits(out[8..<10], day)
+    out[10] = 'T'
+    put_digits(out[11..<13], rest // 3600)
+    out[13] = ':'
+    put_digits(out[14..<16], rest % 3600 // 60)
+    out[16] = ':'
+    put_digits(out[17..<19], rest % 60)
+
+func put_digits(out: u8[], value: i64):
+    var rest = value if value >= 0 else 0
+    var at = out.length
+    while at > 0:
+        at -= 1
+        out[at] = (u8)(rest % 10) + '0'
+        rest = rest // 10
+
+func floor_div(a: i64, b: i64) -> i64:
+    let q = a // b
+    return q - 1 if (a % b != 0) and ((a < 0) != (b < 0)) else q
+
+## The proleptic Gregorian date of day `days` after 1970-01-01 (Howard Hinnant's
+## civil_from_days).
+func civil_from_days(days: i64) -> (i64, i64, i64):
+    let z = days + 719468
+    let era = floor_div(z, 146097)
+    let day_of_era = z - era * 146097
+    let year_of_era = (day_of_era - day_of_era // 1460 + day_of_era // 36524 - day_of_era // 146096) // 365
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
+    let mp = (5 * day_of_year + 2) // 153
+    let day = day_of_year - (153 * mp + 2) // 5 + 1
+    let month = mp + 3 if mp < 10 else mp - 9
+    let year = year_of_era + era * 400 + (1 if month <= 2 else 0)
+    return (year, month, day)
+
+test "civil dates":
+    var text: u8[19]
+    civil_text(0, text)
+    assert((str)text[0..] == "1970-01-01T00:00:00")
+    civil_text(1791158400 + 3723, text)
+    assert((str)text[0..] == "2026-10-05T01:02:03")
+    civil_text(951782400, text)
+    assert((str)text[0..] == "2000-02-29T00:00:00")

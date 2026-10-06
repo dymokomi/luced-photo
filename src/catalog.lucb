@@ -1,0 +1,242 @@
+## The catalog: how luced-photo keeps its library in luce-prism. One durable Store,
+## `library.prism` in the library bundle, holds the identity `photos`:
+##
+##     /state    next                 the id the next imported photo takes
+##     /p<id>    photo                path (relative to the bundle), name, kind,
+##                                    bytes, sha256, imported, captured, captured_unix,
+##                                    offset, width, height, orientation, make, model,
+##                                    lens, focal, aperture, exposure, shutter, iso,
+##                                    bias, rating, flag, label, edited
+##
+## The importer writes photos through a Batch on its thread; the window reads the
+## whole identity into a PhotoIndex and writes ratings, flags and labels back.
+import interop
+import memory
+from luce_prism import prism
+from records import Buffer, Pool, Records
+
+## The identity every photo row lives in.
+pub let photos_identity: str = "photos"
+
+## How long a commit or bake waits for another writer of the identity.
+let wait_ms: i64 = 2000
+
+## One photo, as the catalog stores it; text fields are views of their owner.
+pub struct Photo:
+    pub var id: i64
+    pub var path: str
+    pub var name: str
+    pub var kind: str
+    pub var bytes: i64
+    pub var sha256: str
+    ## Seconds since 1970 UTC when it was imported.
+    pub var imported: i64
+    ## Local capture time, "YYYY-MM-DDTHH:MM:SS", and as seconds since 1970 (UTC
+    ## when `offset` is known, else as if local time were UTC).
+    pub var captured: str
+    pub var captured_unix: i64
+    pub var offset: str
+    pub var width: i64
+    pub var height: i64
+    pub var orientation: i64
+    pub var make: str
+    pub var model: str
+    pub var lens: str
+    pub var focal: f64
+    pub var aperture: f64
+    ## Exposure time in seconds, and as shown ("1/250").
+    pub var exposure: f64
+    pub var shutter: str
+    pub var iso: i64
+    pub var bias: f64
+    ## 0–5 stars; flag 1 picked, -1 rejected; label 0 none or 1–7.
+    pub var rating: i64
+    pub var flag: i64
+    pub var label: i64
+    pub var edited: bool
+
+## The element path of photo `id`, onto `out`.
+func photo_path(id: i64, out: Buffer*) -> !:
+    out.clear()
+    try out.put(b"/p")
+    try out.number(id)
+
+## Mount the photos identity unless the store has it already.
+pub func ensure(store: prism.Store*) -> !:
+    if try store.mounted(photos_identity):
+        return
+    store.mount(photos_identity) catch failure:
+        # Another thread may have mounted it between the look and the mount.
+        if not try store.mounted(photos_identity):
+            error(failure.code, failure.message)
+
+## One commit's worth of writes to the photos identity.
+pub struct Batch:
+    var session: interop.Reference[prism.Session]?
+    var path: Buffer
+    ## How many writes the commit will carry.
+    pub var count: usize
+
+    pub static func begin(store: prism.Store*) -> Batch!:
+        try ensure(store)
+        var batch: Batch
+        batch.session = try store.begin_identity(photos_identity)
+        return batch
+
+    func session_of() -> prism.Session*!:
+        let held = self.session else error(prism.closed, "the catalog batch is closed")
+        return try held.get()
+
+    func integer(path: str, name: str, value: i64) -> !:
+        let held = try prism.Value.integer(value)
+        defer held.release()
+        try (try self.session_of()).set(path, name, held)
+
+    func number(path: str, name: str, value: f64) -> !:
+        let held = try prism.Value.number(value)
+        defer held.release()
+        try (try self.session_of()).set(path, name, held)
+
+    func text(path: str, name: str, value: str) -> !:
+        let held = try prism.Value.text(value)
+        defer held.release()
+        try (try self.session_of()).set(path, name, held)
+
+    func boolean(path: str, name: str, value: bool) -> !:
+        let held = try prism.Value.boolean(value)
+        defer held.release()
+        try (try self.session_of()).set(path, name, held)
+
+    ## Add photo `photo`, or replace every field of the one with its id.
+    pub func put(photo: const Photo*) -> !:
+        try photo_path(photo.id, &self.path)
+        let path = self.path.text_view()
+        let session = try self.session_of()
+        if not try session.contains(path):
+            try session.add(path, "photo")
+        try self.integer(path, "id", photo.id)
+        try self.text(path, "path", photo.path)
+        try self.text(path, "name", photo.name)
+        try self.text(path, "kind", photo.kind)
+        try self.integer(path, "bytes", photo.bytes)
+        try self.text(path, "sha256", photo.sha256)
+        try self.integer(path, "imported", photo.imported)
+        try self.text(path, "captured", photo.captured)
+        try self.integer(path, "captured_unix", photo.captured_unix)
+        try self.text(path, "offset", photo.offset)
+        try self.integer(path, "width", photo.width)
+        try self.integer(path, "height", photo.height)
+        try self.integer(path, "orientation", photo.orientation)
+        try self.text(path, "make", photo.make)
+        try self.text(path, "model", photo.model)
+        try self.text(path, "lens", photo.lens)
+        try self.number(path, "focal", photo.focal)
+        try self.number(path, "aperture", photo.aperture)
+        try self.number(path, "exposure", photo.exposure)
+        try self.text(path, "shutter", photo.shutter)
+        try self.integer(path, "iso", photo.iso)
+        try self.number(path, "bias", photo.bias)
+        try self.integer(path, "rating", photo.rating)
+        try self.integer(path, "flag", photo.flag)
+        try self.integer(path, "label", photo.label)
+        try self.boolean(path, "edited", photo.edited)
+        self.count += 1
+
+    ## Set one integer field (`rating`, `flag` or `label`) of photo `id`; a photo
+    ## no longer in the catalog is passed over.
+    pub func set_mark(id: i64, name: str, value: i64) -> !:
+        try photo_path(id, &self.path)
+        let path = self.path.text_view()
+        if not try (try self.session_of()).contains(path):
+            return
+        try self.integer(path, name, value)
+        self.count += 1
+
+    ## Record that the next photo takes id `next`.
+    pub func set_next(next: i64) -> !:
+        let session = try self.session_of()
+        if not try session.contains("/state"):
+            try session.add("/state", "state")
+        try self.integer("/state", "next", next)
+        self.count += 1
+
+    ## Commit the writes, if there are any, and go on writing in a new commit.
+    pub func flush(store: prism.Store*) -> !:
+        if self.count == 0:
+            return
+        _ = try (try self.session_of()).commit(wait_ms = wait_ms)
+        if let held = self.session:
+            held.release()
+        self.session = none
+        self.count = 0
+        self.session = try store.begin_identity(photos_identity)
+
+    ## Commit the writes, if there are any, and end the batch.
+    pub func commit() -> !:
+        if self.count > 0:
+            _ = try (try self.session_of()).commit(wait_ms = wait_ms)
+        self.close()
+
+    pub func close():
+        if let held = self.session:
+            held.release()
+        self.session = none
+        self.path.close()
+
+## Apply the identity's unbaked commits, so later reads and opens do not replay them.
+pub func bake(store: prism.Store*) -> !:
+    if try store.mounted(photos_identity):
+        _ = try store.bake_identity(photos_identity, wait_ms = wait_ms)
+
+# mark: reading =============================================================================
+
+## Every photo row, with its text kept in `pool`, and the next id.
+pub struct Rows:
+    pub var photos: Records[Photo]
+    pub var pool: Pool
+    pub var next: i64
+
+    pub func close():
+        self.photos.close()
+        self.pool.close()
+
+func kept(into: Rows*, view: const prism.RowView*, name: str) -> str!:
+    return try into.pool.keep_text((view.text(name) else "").bytes)
+
+func collect(context: void*?, view: const prism.RowView*) -> !:
+    let into = (Rows*)(context else error(prism.invalid, "no rows"))
+    let path = view.path()
+    if path == "/state":
+        into.next = view.integer("next") else into.next
+        return
+    if path.length < 3 or path.bytes[1] != 'p':
+        return
+    let id = view.integer("id") else return
+    try into.photos.add(Photo(
+        id = id, path = try kept(into, view, "path"), name = try kept(into, view, "name"),
+        kind = try kept(into, view, "kind"), bytes = view.integer("bytes") else 0,
+        sha256 = try kept(into, view, "sha256"), imported = view.integer("imported") else 0,
+        captured = try kept(into, view, "captured"), captured_unix = view.integer("captured_unix") else 0,
+        offset = try kept(into, view, "offset"), width = view.integer("width") else 0,
+        height = view.integer("height") else 0, orientation = view.integer("orientation") else 1,
+        make = try kept(into, view, "make"), model = try kept(into, view, "model"),
+        lens = try kept(into, view, "lens"), focal = view.number("focal") else 0.0,
+        aperture = view.number("aperture") else 0.0, exposure = view.number("exposure") else 0.0,
+        shutter = try kept(into, view, "shutter"), iso = view.integer("iso") else 0,
+        bias = view.number("bias") else 0.0, rating = view.integer("rating") else 0,
+        flag = view.integer("flag") else 0, label = view.integer("label") else 0,
+        edited = view.boolean("edited") else false))
+
+## Every photo in the catalog, in the order they were added.
+pub func read(store: prism.Store*) -> Rows!:
+    var out = Rows(next = 1)
+    errdefer out.close()
+    if not try store.mounted(photos_identity):
+        return out
+    let snap = try store.snapshot_identity(photos_identity)
+    defer snap.release()
+    try (try snap.get()).each_child("/", collect, &out)
+    for photo in out.photos.view():
+        if photo.id >= out.next:
+            out.next = photo.id + 1
+    return out
