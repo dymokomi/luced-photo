@@ -80,6 +80,12 @@ pub class LibraryPane:
         let shown = index.count()
         self.count.set_text(f"{shown} photos" if shown == total else f"{shown} of {total} photos")
 
+    ## Show another library: no picture loaded for this one's ids is kept.
+    pub func show_library(self) -> unit!:
+        self.pictures = {}
+        self.grid.select(-1)
+        self.refresh()
+
     ## Redraw the badges of the items at `positions`.
     pub func refresh_badges(self, positions: list[int]) -> unit!:
         let index = self.library.index

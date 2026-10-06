@@ -21,6 +21,7 @@ pub class LucedPhoto:
         self.panels = Panels(font, root)
         self.app = Application(self.panels.body, title = "Luced Photo", width = 1500, height = 920, theme = theme.editor_theme())
         self.panels.app = self.app
+        self.panels.show_library_title()
         self.app.set_commands(self.panels.actions.all)
         self.app.set_error_handler(self.panels.tell)
         self.ticking = self.app.every(0.05, func () -> unit!:

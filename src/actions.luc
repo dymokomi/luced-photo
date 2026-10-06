@@ -7,6 +7,8 @@ from luce_window.input import Key
 
 pub class Actions:
     # Library
+    pub let new_library: Command
+    pub let open_library: Command
     pub let import_photos: Command
     pub let import_folder: Command
     pub let export_photos: Command
@@ -38,6 +40,8 @@ pub class Actions:
     pub let all: list[Command]
 
     pub func init(self) -> unit!:
+        self.new_library = Command("New Library…", Shortcut(Key.n, primary = true, shift = true), id = "new_library")
+        self.open_library = Command("Open Library…", Shortcut(Key.o, primary = true), id = "open_library")
         self.import_photos = Command("Import Photos…", Shortcut(Key.i, primary = true, shift = true), id = "import")
         self.import_folder = Command("Import Folder…", Shortcut(Key.o, primary = true, shift = true), id = "import_folder")
         self.export_photos = Command("Export…", Shortcut(Key.e, primary = true, shift = true), id = "export")
@@ -69,7 +73,7 @@ pub class Actions:
         self.palette = Command("Command Palette…", Shortcut(Key.p, primary = true, shift = true), id = "palette")
         self.reset_layout = Command("Reset Layout", id = "reset_layout")
         self.quit = Command("Quit", Shortcut(Key.q, primary = true), id = "quit")
-        self.all = [self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
+        self.all = [self.new_library, self.open_library, self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
         self.all = self.all + [self.next, self.previous, self.zoom, self.undo, self.redo, self.copy_settings, self.paste_settings,
                                self.sync_settings, self.reset_settings, self.palette, self.reset_layout, self.quit]

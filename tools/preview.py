@@ -22,6 +22,7 @@ parser.add_argument("--undo", action="store_true", help="undo the --develop edit
 parser.add_argument("--crop", action="store_true", help="show the crop tool")
 parser.add_argument("--presets", action="store_true", help="save the --develop edit as a preset and apply it to the next photo")
 parser.add_argument("--export", default="", help="export the photo at --position and the next to this path (JPEG, 2048 px)")
+parser.add_argument("--switch", default="", help="open (making it) the library at this path mid-run")
 parser.add_argument("--output", type=Path, default=ROOT / "build/preview.png")
 arguments = parser.parse_args()
 
@@ -44,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix="luced-photo-preview-") as temporary:
     environment = dict(os.environ, LUCE_CACHE=str(ROOT / "build/cache"))
     subprocess.run([os.environ.get("LUCE", str(ROOT.parent / "luce/build/luce")), "build", str(project / "src/main.luc"), "--native", "-o", str(binary)], check=True, env=environment, timeout=600)
     ppm = project / "preview.ppm"
-    subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else ("expanded" if arguments.expanded else ("color" if arguments.color else ("zoom" if arguments.zoom else ("export" if arguments.export else ("undo" if arguments.undo else ("crop" if arguments.crop else ("presets" if arguments.presets else "")))))))] + ([str(Path(arguments.export).resolve())] if arguments.export else []), check=True, timeout=120)
+    subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else ("expanded" if arguments.expanded else ("color" if arguments.color else ("zoom" if arguments.zoom else ("export" if arguments.export else ("undo" if arguments.undo else ("crop" if arguments.crop else ("presets" if arguments.presets else ("switch" if arguments.switch else ""))))))))] + ([str(Path(arguments.export).resolve())] if arguments.export else []) + ([str(Path(arguments.switch).resolve())] if arguments.switch else []), check=True, timeout=120)
     header, dimensions, maximum, pixels = ppm.read_bytes().split(b"\n", 3)
     width, height = map(int, dimensions.split())
     rows = b"".join(b"\0" + pixels[y * width * 3:(y + 1) * width * 3] for y in range(height))

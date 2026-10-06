@@ -19,6 +19,8 @@ pub func main(arguments: list[str]) -> int!:
     let cropping = arguments.length > 5 and arguments[5] == "crop"
     # Save the --develop edit as a preset, then click it on the next photo.
     let presetting = arguments.length > 5 and arguments[5] == "presets"
+    # Open (making it) the library at the next argument.
+    let switching = arguments.length > 6 and arguments[5] == "switch"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -49,6 +51,8 @@ pub func main(arguments: list[str]) -> int!:
         if ticks == 40 and presetting:
             let presets = photo.panels.library.presets
             photo.panels.presets.apply(presets.position_of_name("Preview Look"))
+        if ticks == 30 and switching:
+            photo.panels.open_library(arguments[6])
         if ticks == 40 and undoing:
             photo.panels.session.undo()
         if ticks == 10 and exporting:
@@ -68,7 +72,7 @@ pub func main(arguments: list[str]) -> int!:
         _ = elapsed
         if capture == 0:
             capture = 1
-            probe.begin("Luced Photo")
+            probe.begin(photo.app.title())
             photo.panels.body.layout().invalidate()
         elif capture == 1:
             capture = 2

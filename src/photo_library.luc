@@ -20,8 +20,8 @@ pub func default_root() -> str!:
     return paths.join(paths.join(files.home_directory(), "Pictures"), "Luced Photo.library")
 
 pub class PhotoLibrary:
-    pub let root: str
-    pub let store: prism.Store
+    pub var root: str
+    pub var store: prism.Store
     pub var index: PhotoIndex
     ## The develop presets, by name; read again after every change.
     pub var presets: PresetList
@@ -36,6 +36,22 @@ pub class PhotoLibrary:
         library.ensure(root)
         self.store = prism.Store.open(library.catalog_path(root))
         self.index = photo_index.read_index(self.store)
+        self.presets = presets.read_presets(self.store)
+
+    ## Close this library and open the bundle at `root` in its place, made
+    ## when it is missing; the filter stays. Not while an import runs.
+    pub func switch_to(self, root: str) -> unit!:
+        if self.importing():
+            error(busy, "an import is running; wait for it or open the library after")
+        if let current = self.running:
+            current.close()
+        self.running = none
+        library.ensure(root)
+        let store = prism.Store.open(library.catalog_path(root))
+        self.store.close()
+        self.store = store
+        self.root = root
+        self.reload()
         self.presets = presets.read_presets(self.store)
 
     ## Read the catalog again, keeping the filter.

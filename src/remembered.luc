@@ -1,0 +1,33 @@
+## What luced-photo remembers between runs, in ~/.luced-photo/settings.prisma:
+## the library last open, which the next run opens again.
+from luce_prism.prism import Document, Value, Encoding
+from luce_std import files, paths
+import library
+
+func settings_path() -> str!:
+    return paths.join(paths.join(files.home_directory(), ".luced-photo"), "settings.prisma")
+
+## The library last open, or "" when there is none or it is gone.
+pub func last_library() -> str:
+    let path = settings_path() catch failure:
+        return ""
+    let text = files.read_text(path, limit = 65536) catch failure:
+        return ""
+    let root = library_in(text) catch failure:
+        return ""
+    let catalog = library.catalog_path(root) catch failure:
+        return ""
+    return root if library.exists(catalog) else ""
+
+func library_in(text: str) -> str!:
+    let doc = Document.parse(text)
+    return doc.get("/settings", "library").text_at()
+
+## Remember `root` as the library open now.
+pub func remember_library(root: str) -> unit!:
+    let doc = Document()
+    doc.add("/settings", "luced_photo_settings")
+    doc.set("/settings", "library", Value.text(root))
+    let path = settings_path()
+    files.ensure_directory(paths.directory(path))
+    doc.save(path, Encoding.text)

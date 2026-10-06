@@ -141,6 +141,12 @@ Catalog identities (luce-prism):
 - **Thumbnails** come from the embedded JPEG (luce-raw `preview`, under 1 ms)
   until the photo has edits. After an edit, the CPU path renders a 512 px
   thumbnail in the background.
+- **Libraries.** Library › New Library… asks for a folder, then a name, and
+  makes `<name>.library` there. Library › Open Library… opens a bundle, meaning
+  a folder holding library.prism. Either one swaps the window over in place;
+  undo history is per library, and copied settings carry across. The library
+  last open is remembered in `~/.luced-photo/settings.prisma` and opened at the
+  next start, unless `--library` names one.
 - **Cloud sync** comes later. The bundle layout and content hashes make it a
   matter of syncing files plus prism's journal.
 

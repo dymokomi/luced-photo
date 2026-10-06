@@ -2,7 +2,8 @@
 ## preview and grid thumbnail are developed again on the CPU (luce-develop's
 ## process) on a thread of their own, so the grid shows edits. A newer request
 ## for the same photo replaces one still waiting; the window polls which photos
-## are done and reloads their cells.
+## are done and reloads their cells. Each request names its library, so one
+## asked for before the window opened another library still lands in its own.
 import c
 import interop
 import memory
@@ -18,10 +19,12 @@ import library
 struct Job:
     var id: i64
     ## NUL-terminated heap copies (strings.copy).
+    var root: str
     var original: str
     var settings: str
 
     func release():
+        strings.release(self.root)
         strings.release(self.original)
         strings.release(self.settings)
 
@@ -30,7 +33,6 @@ struct Shared:
     var wake: sync.Condition
     var jobs: List[Job]
     var done: List[i64]
-    var root: str
     var stopping: bool
 
 func work(context: void*?):
@@ -47,7 +49,7 @@ func work(context: void*?):
         let job = shared.jobs.at(0)
         shared.jobs.remove(0)
         shared.lock.unlock()
-        render(shared.root, &job, &path) catch failure:
+        render(&job, &path) catch failure:
             _ = failure
         job.release()
         shared.lock.lock()
@@ -56,7 +58,8 @@ func work(context: void*?):
         shared.lock.unlock()
 
 ## Develop `job`'s photo into its preview and thumbnail files.
-func render(root: str, job: const Job*, path: Buffer*) -> !:
+func render(job: const Job*, path: Buffer*) -> !:
+    let root = job.root
     var opened = try scene.open(job.original, (usize)library.preview_edge)
     defer opened.close()
     var preview = try process.render(&opened, parse(job.settings))
@@ -72,11 +75,11 @@ pub struct Rerenderer:
     var shared: Shared*?
     var worker: thread.Handle
 
-    ## Develop photo `id` from `original` with `settings` (text form) into its
-    ## cached preview and thumbnail.
-    pub func request(id: i64, original: str, settings: str) -> !:
+    ## Develop photo `id` of the library at `root` from `original` with
+    ## `settings` (text form) into its cached preview and thumbnail.
+    pub func request(id: i64, root: str, original: str, settings: str) -> !:
         let shared = self.shared else return
-        let job = Job(id = id, original = try strings.copy(original), settings = try strings.copy(settings))
+        let job = Job(id = id, root = try strings.copy(root), original = try strings.copy(original), settings = try strings.copy(settings))
         shared.lock.lock()
         var at: usize = 0
         while at < shared.jobs.length():
@@ -115,17 +118,15 @@ pub struct Rerenderer:
             job.release()
         shared.jobs.destroy()
         shared.done.destroy()
-        strings.release(shared.root)
         free(shared) in memory.heap
         self.shared = none
 
 pub let rerenderer_type: interop.Type[Rerenderer] = interop.Type[Rerenderer]("Rerenderer", Rerenderer.close, closeable = true, main_thread = true)
 
-## A re-renderer for the library bundle at `root`.
-pub func start(root: str) -> interop.Reference[Rerenderer]!:
+## A re-renderer, its thread started.
+pub func start() -> interop.Reference[Rerenderer]!:
     let shared = try new Shared in memory.heap
     errdefer free(shared) in memory.heap
-    shared.root = try strings.copy(root)
     let worker = try thread.spawn(work, (void*)shared, name = "luced-photo rerender")
     let made = try new Rerenderer(shared = shared, worker = worker) in memory.heap
     return try interop.Reference[Rerenderer].adopt(made, rerenderer_type, memory.heap)

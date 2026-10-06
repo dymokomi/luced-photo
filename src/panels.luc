@@ -3,7 +3,7 @@
 ## picking photos in the grid shows the lead one in the viewer and its facts in
 ## Properties; ratings, flags and labels act on the whole selection; an import's
 ## progress shows in the status line while the grid fills in.
-from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
+from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command, TextPrompt
 from interop import Connection
 from actions import Actions, label_number
 from photo_library import PhotoLibrary
@@ -19,6 +19,8 @@ from export_dialog import ExportDialog
 from luce_std import paths
 from luce_develop import geometry
 import rerender
+import remembered
+import library
 
 
 ## How often the grid reloads the catalog while an import adds photos, in ticks.
@@ -40,6 +42,9 @@ pub class Panels:
     ## Writes exports, and asks how.
     let exporter: Exporter
     let export_dialog: ExportDialog
+    ## Asks a new library's name; the folder it goes in, chosen first.
+    let library_prompt: TextPrompt
+    var new_library_parent: str = ""
     var connections: list[Connection] = []
     ## The developed photo: saving, undo and redo, settings between photos.
     pub let session: DevelopSession
@@ -50,13 +55,15 @@ pub class Panels:
     pub func init(self, font: Font, root: str) -> unit!:
         self.library = PhotoLibrary(root)
         self.actions = Actions()
-        self.rerenderer = rerender.start(root)
+        self.rerenderer = rerender.start()
         self.exporter = exporter.start()
         self.export_dialog = ExportDialog(font)
         self.export_dialog.chosen = self.export
         self.export_dialog.ask_target = func (name: str) -> str!:
             let app = self.app else return ""
             return app.save_file("Export to", name)
+        self.library_prompt = TextPrompt(font = font)
+        self.connections.append(self.library_prompt.on_submit(self.create_library))
         self.library_pane = LibraryPane(self.library, font)
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
@@ -97,7 +104,7 @@ pub class Panels:
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
-                              Menu("Library", [actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
+                              Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
                               Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom], font = font),
                               Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.sync_settings, actions.reset_settings], font = font),
@@ -111,11 +118,10 @@ pub class Panels:
         self.dock.set_fraction(self.library_pane.panel, 0.72)
         self.dock.layout().set_flex()
         let footer = HStack([self.status], padding = 6.0)
-        self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
+        self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.library_prompt, self.palette], spacing = 0.0)
         self.body.layout().set_flex()
         self.actions.refresh(false)
-        let total = self.library.index.total()
-        self.tell("The library is empty: Library › Import Photos… or drop photos on the grid." if total == 0 else f"{total} photos in {root}")
+        self.greet()
 
     func tool(self, font: Font, icon: str, command: Command) -> Button!:
         let button = Button(icon = icon, font = font)
@@ -125,6 +131,8 @@ pub class Panels:
 
     func bind_actions(self) -> unit!:
         let actions = self.actions
+        self.connections.append(actions.new_library.on_trigger(self.choose_new_library))
+        self.connections.append(actions.open_library.on_trigger(self.choose_library))
         self.connections.append(actions.import_photos.on_trigger(self.choose_import))
         self.connections.append(actions.import_folder.on_trigger(self.choose_import_folder))
         self.connections.append(self.library_pane.grid.on_drop(self.import_dropped))
@@ -173,6 +181,69 @@ pub class Panels:
         self.connections.append(actions.quit.on_trigger(func () -> unit!:
             if let app = self.app:
                 app.stop()))
+
+    # mark: libraries ===========================================================================
+
+    ## Library › New Library…: the folder to make it in, then its name.
+    func choose_new_library(self) -> unit!:
+        let app = self.app else return
+        let parent = app.choose_folder("Choose the folder to make the new library in")
+        if parent == "":
+            return
+        self.new_library_parent = parent
+        self.library_prompt.open(f"Name the new library in {paths.base(parent)}", "Photos", accept = "Create")
+
+    func create_library(self, typed: str) -> unit!:
+        var name = typed.trim()
+        if name.ends_with(".library"):
+            name = name[..<name.length - 8]
+        if name == "" or "/" in name or name.starts_with("."):
+            self.library_prompt.open("Name the new library (no slashes)", typed, accept = "Create")
+            return
+        let root = paths.join(self.new_library_parent, name + ".library")
+        if library.exists(root) and not library.exists(library.catalog_path(root)):
+            self.library_prompt.open(f"{name}.library is already a folder there; choose another name", name, accept = "Create")
+            return
+        self.open_library(root)
+
+    ## Library › Open Library…: a library bundle (the folder holding library.prism).
+    func choose_library(self) -> unit!:
+        let app = self.app else return
+        let root = app.choose_folder("Choose a library to open")
+        if root == "":
+            return
+        if not library.exists(library.catalog_path(root)):
+            self.tell(f"{paths.base(root)} is not a Luced Photo library: it has no library.prism.")
+            return
+        self.open_library(root)
+
+    ## Show the library at `root` in this window, made when it is missing.
+    pub func open_library(self, root: str) -> unit!:
+        if root == self.library.root:
+            return
+        self.session.flush()
+        self.library.switch_to(root) catch failure:
+            self.tell(f"Could not open {paths.base(root)}: {failure.message}")
+            return
+        self.session.forget()
+        self.unshown = -1
+        self.library_pane.show_library()
+        self.presets.show()
+        self.show_selection(-1)
+        self.show_library_title()
+        self.greet()
+
+    ## The window's title names the library; it is remembered for the next run.
+    pub func show_library_title(self) -> unit!:
+        if let app = self.app:
+            app.set_title(f"Luced Photo — {paths.stem(self.library.root)}")
+        remembered.remember_library(self.library.root) catch failure:
+            _ = failure
+
+    func greet(self) -> unit!:
+        let total = self.library.index.total()
+        let name = paths.stem(self.library.root)
+        self.tell(f"{name} is empty: Library › Import Photos… or drop photos on the grid." if total == 0 else f"{total} photos in {name}")
 
     # mark: importing ===========================================================================
 
@@ -294,6 +365,8 @@ pub class Panels:
         self.properties.show(lead, selected)
         if lead < 0:
             self.session.close_photo()
+            # The controls show the defaults, not the photo let go.
+            self.properties.develop.show("", 5500.0, 0.0)
             self.viewer.clear()
             self.properties.histogram.clear()
             return

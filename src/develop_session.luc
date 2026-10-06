@@ -92,6 +92,13 @@ pub class DevelopSession:
         self.flush()
         self.developing = -1
 
+    ## Forget every photo's history: another library is open, whose ids name
+    ## other photos. Copied settings stay, to paste into the new library.
+    pub func forget(self) -> unit!:
+        self.close_photo()
+        self.undo_steps = {}
+        self.redo_steps = {}
+
     ## The controls changed the look: show it, and save it once edits settle.
     pub func changed(self) -> unit!:
         self.viewer.set_look(self.controls.look)
@@ -135,7 +142,7 @@ pub class DevelopSession:
         let at = self.library.index.position_of(id)
         if at >= 0:
             self.pane.refresh_badges([at])
-            self.rerenderer.request(id, self.library.original_path(at), text)
+            self.rerenderer.request(id, self.library.root, self.library.original_path(at), text)
 
     ## Show settings `text` on the developed photo and save them, without a step.
     func take(self, text: str) -> unit!:
