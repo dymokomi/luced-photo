@@ -11,6 +11,8 @@ from photo_library import PhotoLibrary
 from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
+from rerender import Rerenderer
+import rerender
 from luce_develop.settings import Settings, parse, encode
 
 ## Ticks (of 0.05 s) a develop change waits for more before it is saved.
@@ -29,6 +31,8 @@ pub class Panels:
     pub let dock: DStack
     let status: Text
     let palette: CommandPalette
+    ## Develops edited photos' previews and thumbnails again.
+    let rerenderer: Rerenderer
     var connections: list[Connection] = []
     ## The photo whose develop changed and is not saved yet (-1 none), and ticks
     ## since its last change.
@@ -43,6 +47,7 @@ pub class Panels:
     pub func init(self, font: Font, root: str) -> unit!:
         self.library = PhotoLibrary(root)
         self.actions = Actions()
+        self.rerenderer = rerender.start(root)
         self.library_pane = LibraryPane(self.library, font)
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
@@ -198,6 +203,12 @@ pub class Panels:
 
     # mark: the develop =========================================================================
 
+    ## Develop the shown photo with `settings`, as if the user set them.
+    pub func apply_develop(self, settings: Settings) -> unit!:
+        let controls = self.properties.develop
+        controls.show(settings, 5500.0, 0.0)
+        self.develop_changed(settings)
+
     func develop_changed(self, settings: Settings) -> unit!:
         self.viewer.set_settings(settings)
         if self.developing >= 0:
@@ -217,6 +228,7 @@ pub class Panels:
         let at = self.library.index.position_of(id)
         if at >= 0:
             self.library_pane.refresh_badges([at])
+            self.rerenderer.request(id, self.library.original_path(at), text)
 
     ## Move the lead `direction` photos on, selecting it alone.
     func step(self, direction: int) -> unit!:
@@ -247,6 +259,10 @@ pub class Panels:
         self.library_pane.tick()
         self.viewer.tick()
         self.take_import_events()
+        var redone = self.rerenderer.take()
+        while redone >= 0:
+            self.library_pane.reload_thumbnail(redone)
+            redone = self.rerenderer.take()
         if self.unsaved >= 0:
             self.unsaved_ticks += 1
             if self.unsaved_ticks >= save_ticks:
@@ -261,6 +277,7 @@ pub class Panels:
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()
+        self.rerenderer.close()
         self.library_pane.close()
         self.viewer.close()
         self.properties.close()

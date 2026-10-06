@@ -86,6 +86,14 @@ pub class LibraryPane:
         for at in positions:
             self.grid.set_badges(at, index.rating(at), index.flag(at), index.label(at), index.edited(at))
 
+    ## Let photo `id`'s thumbnail go, so it loads again (its file changed).
+    pub func reload_thumbnail(self, id: int) -> unit!:
+        _ = self.pictures.remove(id)
+        let at = self.library.index.position_of(id)
+        if at >= 0:
+            self.grid.clear_image(at)
+            _ = self.requested.remove(at)
+
     ## The selected items, the lead among them.
     pub func selection(self) -> list[int]:
         var picked: list[int] = []
