@@ -15,6 +15,8 @@ parser.add_argument("--position", type=int, default=0)
 parser.add_argument("--cell", type=float, default=0.0)
 parser.add_argument("--develop", default="", help="develop settings text to show, e.g. exposure=1;contrast=30")
 parser.add_argument("--guides", action="store_true", help="show the guide tool")
+parser.add_argument("--expanded", action="store_true", help="open every Properties section")
+parser.add_argument("--color", action="store_true", help="open the color sections only")
 parser.add_argument("--output", type=Path, default=ROOT / "build/preview.png")
 arguments = parser.parse_args()
 
@@ -37,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix="luced-photo-preview-") as temporary:
     environment = dict(os.environ, LUCE_CACHE=str(ROOT / "build/cache"))
     subprocess.run([os.environ.get("LUCE", str(ROOT.parent / "luce/build/luce")), "build", str(project / "src/main.luc"), "--native", "-o", str(binary)], check=True, env=environment, timeout=600)
     ppm = project / "preview.ppm"
-    subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else ""], check=True, timeout=120)
+    subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else ("expanded" if arguments.expanded else ("color" if arguments.color else ""))], check=True, timeout=120)
     header, dimensions, maximum, pixels = ppm.read_bytes().split(b"\n", 3)
     width, height = map(int, dimensions.split())
     rows = b"".join(b"\0" + pixels[y * width * 3:(y + 1) * width * 3] for y in range(height))
