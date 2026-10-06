@@ -14,6 +14,7 @@ pub func main(arguments: list[str]) -> int!:
     let expanded = arguments.length > 5 and arguments[5] == "expanded"
     let color_sections = arguments.length > 5 and arguments[5] == "color"
     let zoomed = arguments.length > 5 and arguments[5] == "zoom"
+    let exporting = arguments.length > 6 and arguments[5] == "export"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -31,6 +32,9 @@ pub func main(arguments: list[str]) -> int!:
             photo.panels.properties.develop.set_all_open(true)
         if ticks == 6 and color_sections:
             photo.panels.properties.develop.open_only(["Color Mixer", "Color Grading", "Black & White"])
+        if ticks == 10 and exporting:
+            photo.panels.library_pane.grid.mark(position + 1, true)
+            photo.panels.export(0, 90, 2048, arguments[6])
         if ticks == 30 and zoomed:
             photo.panels.viewer.toggle_zoom()
         if ticks == 30 and guiding:

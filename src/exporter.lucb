@@ -1,0 +1,170 @@
+## The exporter: develops photos at full size and writes them out on a thread of
+## its own (luce-develop's export), so the window never waits. The window queues
+## the photos, then polls events, one line each, fields separated by tabs:
+##     exported  done  total  file   a photo is written
+##     failed    done  total  file  message
+##     done      written  failed     the queue is empty
+import interop
+import memory
+import strings
+import sync
+import thread
+from luce_std.collections import Buffer, List
+from luce_std import paths
+from luce_develop import export
+
+struct Job:
+    ## NUL-terminated heap copies (strings.copy).
+    var source: str
+    var settings: str
+    var target: str
+
+    func release():
+        strings.release(self.source)
+        strings.release(self.settings)
+        strings.release(self.target)
+
+struct Shared:
+    var lock: sync.Mutex
+    var wake: sync.Condition
+    var jobs: List[Job]
+    var events: Buffer
+    var format: i64
+    var quality: i64
+    var edge: i64
+    var total: i64
+    var done: i64
+    var written: i64
+    var failed: i64
+    var stopping: bool
+
+    func post_line(fields: const str[]):
+        var line: Buffer
+        defer line.destroy()
+        for (at, field) in fields.indexed():
+            if at > 0:
+                line.put_byte('\t') catch failure:
+                    return
+            for byte in field.bytes:
+                line.put_byte(' ' if byte == '\t' or byte == '\n' else byte) catch failure:
+                    return
+        self.events.put(line.view()) catch failure:
+            return
+        self.events.put_byte('\n') catch failure:
+            return
+
+func work(context: void*?):
+    let shared = (Shared*)(context else return)
+    while true:
+        shared.lock.lock()
+        while shared.jobs.length() == 0 and not shared.stopping:
+            shared.wake.wait(&shared.lock)
+        if shared.stopping:
+            shared.lock.unlock()
+            return
+        let job = shared.jobs.at(0)
+        shared.jobs.remove(0)
+        let format = shared.format
+        let quality = shared.quality
+        let edge = shared.edge
+        shared.lock.unlock()
+        var message = ""
+        var buffer: u8[256]
+        export.export(job.source, job.settings, job.target, format, quality, edge) catch failure:
+            let length = failure.message.length if failure.message.length < 256 else 256
+            memory.copy(buffer[..<length], failure.message.bytes[..<length], length)
+            message = (str)buffer[..<length]
+        shared.lock.lock()
+        shared.done += 1
+        var count: u8[24]
+        var total: u8[24]
+        let done_text = strings.format(count, f"{shared.done}") catch failure:
+            recover ""
+        let total_text = strings.format(total, f"{shared.total}") catch failure:
+            recover ""
+        if message == "":
+            shared.written += 1
+            shared.post_line([(str)"exported", done_text, total_text, paths.base(job.target)])
+        else:
+            shared.failed += 1
+            shared.post_line([(str)"failed", done_text, total_text, paths.base(job.target), message])
+        if shared.jobs.length() == 0:
+            var written: u8[24]
+            var failed: u8[24]
+            let written_text = strings.format(written, f"{shared.written}") catch failure:
+                recover ""
+            let failed_text = strings.format(failed, f"{shared.failed}") catch failure:
+                recover ""
+            shared.post_line([(str)"done", written_text, failed_text])
+        shared.lock.unlock()
+        job.release()
+
+pub struct Exporter:
+    var shared: Shared*?
+    var worker: thread.Handle
+    var polled: Buffer
+
+    ## Export with these settings from now on: `format` (luce-develop's export.jpeg
+    ## or export.png16), JPEG `quality`, and the longer side `edge` (0: full size).
+    pub func configure(format: i64, quality: i64, edge: i64):
+        let shared = self.shared else return
+        shared.lock.lock()
+        shared.format = format
+        shared.quality = quality
+        shared.edge = edge
+        shared.lock.unlock()
+
+    ## Queue the photo at `source`, developed with `settings`, for `target`.
+    pub func add(source: str, settings: str, target: str) -> !:
+        let shared = self.shared else return
+        let job = Job(source = try strings.copy(source), settings = try strings.copy(settings), target = try strings.copy(target))
+        shared.lock.lock()
+        if shared.jobs.length() == 0 and shared.done == shared.total:
+            shared.done = 0
+            shared.total = 0
+            shared.written = 0
+            shared.failed = 0
+        shared.total += 1
+        shared.jobs.append(job) catch failure:
+            shared.total -= 1
+            shared.lock.unlock()
+            job.release()
+            error(failure.code, failure.message)
+        shared.lock.unlock()
+        shared.wake.signal()
+
+    ## The events since the last poll, one a line; "" when there are none.
+    pub func poll() -> str!:
+        self.polled.clear()
+        let shared = self.shared else return ""
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        try self.polled.put(shared.events.view())
+        shared.events.clear()
+        return self.polled.text()
+
+    pub func close():
+        let shared = self.shared else return
+        shared.lock.lock()
+        shared.stopping = true
+        shared.lock.unlock()
+        shared.wake.broadcast()
+        self.worker.join() catch failure:
+            trap("the export thread could not be joined")
+        for job in shared.jobs.view():
+            job.release()
+        shared.jobs.destroy()
+        shared.events.destroy()
+        free(shared) in memory.heap
+        self.shared = none
+        self.polled.destroy()
+
+pub let exporter_type: interop.Type[Exporter] = interop.Type[Exporter]("Exporter", Exporter.close, closeable = true, main_thread = true)
+
+## An exporter, its thread started.
+pub func start() -> interop.Reference[Exporter]!:
+    let shared = try new Shared(format = export.jpeg, quality = 92) in memory.heap
+    errdefer free(shared) in memory.heap
+    let worker = try thread.spawn(work, (void*)shared, name = "luced-photo export")
+    let made = try new Exporter(shared = shared, worker = worker) in memory.heap
+    return try interop.Reference[Exporter].adopt(made, exporter_type, memory.heap)

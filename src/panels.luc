@@ -12,6 +12,10 @@ from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
 from rerender import Rerenderer
+from exporter import Exporter
+import exporter
+from export_dialog import ExportDialog
+from luce_std import paths
 from luce_develop import geometry
 import rerender
 
@@ -33,6 +37,9 @@ pub class Panels:
     let palette: CommandPalette
     ## Develops edited photos' previews and thumbnails again.
     let rerenderer: Rerenderer
+    ## Writes exports, and asks how.
+    let exporter: Exporter
+    let export_dialog: ExportDialog
     var connections: list[Connection] = []
     ## The photo whose develop changed and is not saved yet (-1 none), and ticks
     ## since its last change.
@@ -50,6 +57,9 @@ pub class Panels:
         self.library = PhotoLibrary(root)
         self.actions = Actions()
         self.rerenderer = rerender.start(root)
+        self.exporter = exporter.start()
+        self.export_dialog = ExportDialog(font)
+        self.export_dialog.chosen = self.export
         self.library_pane = LibraryPane(self.library, font)
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
@@ -76,7 +86,7 @@ pub class Panels:
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
-                              Menu("Library", [actions.import_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
+                              Menu("Library", [actions.import_photos, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
                               Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom], font = font),
                               Menu("Window", [actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
@@ -87,7 +97,7 @@ pub class Panels:
         self.dock.set_fraction(self.viewer.panel, 0.7)
         self.dock.layout().set_flex()
         let footer = HStack([self.status], padding = 6.0)
-        self.body = VStack([toolbar, self.dock, footer, self.palette], spacing = 0.0)
+        self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
         self.body.layout().set_flex()
         self.actions.refresh(false)
         let total = self.library.index.total()
@@ -127,6 +137,11 @@ pub class Panels:
             self.step(1)))
         self.connections.append(actions.previous.on_trigger(func () -> unit!:
             self.step(-1)))
+        self.connections.append(actions.export_photos.on_trigger(func () -> unit!:
+            let picked = self.library_pane.selection()
+            if picked.length > 0:
+                self.save_develop()
+                self.export_dialog.open(picked.length, self.library.index.name(picked[0]))))
         self.connections.append(actions.zoom.on_trigger(func () -> unit!:
             self.viewer.toggle_zoom()))
         self.connections.append(actions.palette.on_trigger(func () -> unit!:
@@ -198,6 +213,42 @@ pub class Panels:
             let at = self.library.index.position_of(lead_id)
             if at >= 0:
                 grid.select(at)
+
+    # mark: exporting ==========================================================================
+
+    ## Export the selected photos as `format` at `quality` and long edge `edge`:
+    ## the first to `target`, the rest beside it under their own names.
+    pub func export(self, format: int, quality: int, edge: int, target: str) -> unit!:
+        let picked = self.library_pane.selection()
+        let folder = paths.directory(target)
+        let extension = ".png" if format == 1 else ".jpg"
+        self.exporter.configure(format, quality, edge)
+        var taken: set[str] = {}
+        for (at, position) in picked.indexed():
+            let index = self.library.index
+            var path = target if at == 0 else paths.join(folder, paths.stem(index.name(position)) + extension)
+            # Two photos of one name do not overwrite each other.
+            var number = 2
+            while path in taken:
+                path = paths.join(folder, f"{paths.stem(index.name(position))}-{number}{extension}")
+                number += 1
+            taken.insert(path)
+            self.exporter.add(self.library.original_path(position), index.settings(position), path)
+        self.tell(f"Exporting {picked.length} photos…" if picked.length > 1 else "Exporting…")
+
+    func take_export_events(self) -> unit!:
+        for line in self.exporter.poll().lines():
+            let fields = line.split("\t")
+            match fields[0]:
+                "exported":
+                    self.tell(f"Exported {fields[1]} of {fields[2]}: {fields[3]}")
+                "failed":
+                    self.tell(f"Not exported: {fields[3]}: {fields[4]}")
+                "done":
+                    let failed = f", {fields[2]} failed" if fields[2] != "0" else ""
+                    self.tell(f"Exported {fields[1]} photos{failed}.")
+                _:
+                    continue
 
     # mark: the selection =======================================================================
 
@@ -277,6 +328,7 @@ pub class Panels:
     pub func poll(self) -> unit!:
         self.library_pane.tick()
         self.viewer.tick()
+        self.take_export_events()
         self.properties.develop.tick()
         if self.histogram_due >= 0:
             self.histogram_due -= 1
@@ -302,6 +354,8 @@ pub class Panels:
             connection.disconnect()
         self.connections.clear()
         self.rerenderer.close()
+        self.exporter.close()
+        self.export_dialog.close()
         self.library_pane.close()
         self.viewer.close()
         self.properties.close()

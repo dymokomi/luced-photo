@@ -1,0 +1,57 @@
+## Library › Export…: the format, quality and size, in a dialog with the same
+## rows as Properties, then where to write. One photo is named in the save panel;
+## several go beside the name chosen there, each under its own name. The export
+## itself runs on the exporter's thread (exporter.lucb).
+from luce_ui.ui import Dialog, Text, HStack, Spacer, Button, Font, ParameterPanel, ParameterSpec, ParameterKind
+from interop import Connection
+from luce_dialogs import dialogs
+from luce_std import paths
+
+pub class ExportDialog:
+    pub let dialog: Dialog
+    let settings: ParameterPanel
+    let title: Text
+    var connections: list[Connection] = []
+    ## Export was pressed: the format, quality and long edge, and where the save
+    ## panel pointed.
+    pub var chosen: func(int, int, int, str) -> unit!? = none
+    ## The name the save panel suggests: the first photo's.
+    var suggested: str = ""
+
+    pub func init(self, font: Font) -> unit!:
+        self.title = Text("Export", font = font)
+        self.settings = ParameterPanel([
+            ParameterSpec(name = "format", label = "Format", kind = ParameterKind.menu, items = "JPEG=0|PNG, 16-bit=1"),
+            ParameterSpec(name = "quality", label = "Quality", kind = ParameterKind.integer, value = 92.0, minimum = 1.0, maximum = 100.0, slider = true, hide_when = "{ format == 1 }"),
+            ParameterSpec(name = "edge", label = "Size", kind = ParameterKind.menu, items = "Full Size=0|Long Edge 4096=4096|Long Edge 3000=3000|Long Edge 2048=2048|Long Edge 1080=1080")],
+            font = font, label_width = 80.0)
+        let cancel = Button("Cancel", font = font)
+        let export = Button("Export…", font = font)
+        self.connections.append(cancel.on_click(func () -> unit!:
+            self.dialog.hide()))
+        self.connections.append(export.on_click(self.export))
+        self.dialog = Dialog([self.title, self.settings, HStack([Spacer(), cancel, export], spacing = 8.0)], width = 380.0)
+        self.connections.append(self.dialog.on_cancel(func () -> unit!:
+            self.dialog.hide()))
+        self.connections.append(self.dialog.on_accept(self.export))
+
+    ## Open the dialog for `count` photos, the first named `first`.
+    pub func open(self, count: int, first: str) -> unit!:
+        self.suggested = first
+        self.title.set_text("Export 1 Photo" if count == 1 else f"Export {count} Photos")
+        self.dialog.open()
+
+    func export(self) -> unit!:
+        let format = int(self.settings.value(self.settings.find("format")))
+        let quality = int(self.settings.value(self.settings.find("quality")))
+        let edge = int(self.settings.value(self.settings.find("edge")))
+        let name = paths.stem(self.suggested) + (".png" if format == 1 else ".jpg")
+        let target = dialogs.save_file("Export to", name) else return
+        self.dialog.hide()
+        if let tell = self.chosen:
+            tell(format, quality, edge, target)
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
