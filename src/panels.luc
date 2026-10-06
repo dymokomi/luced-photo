@@ -3,7 +3,7 @@
 ## picking photos in the grid shows the lead one in the viewer and its facts in
 ## Properties; ratings, flags and labels act on the whole selection; an import's
 ## progress shows in the status line while the grid fills in.
-from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command, TextPrompt
+from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
 from interop import Connection
 from actions import Actions, label_number
 from photo_library import PhotoLibrary
@@ -42,9 +42,6 @@ pub class Panels:
     ## Writes exports, and asks how.
     let exporter: Exporter
     let export_dialog: ExportDialog
-    ## Asks a new library's name; the folder it goes in, chosen first.
-    let library_prompt: TextPrompt
-    var new_library_parent: str = ""
     var connections: list[Connection] = []
     ## The developed photo: saving, undo and redo, settings between photos.
     pub let session: DevelopSession
@@ -62,8 +59,6 @@ pub class Panels:
         self.export_dialog.ask_target = func (name: str) -> str!:
             let app = self.app else return ""
             return app.save_file("Export to", name)
-        self.library_prompt = TextPrompt(font = font)
-        self.connections.append(self.library_prompt.on_submit(self.create_library))
         self.library_pane = LibraryPane(self.library, font)
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
@@ -118,7 +113,7 @@ pub class Panels:
         self.dock.set_fraction(self.library_pane.panel, 0.72)
         self.dock.layout().set_flex()
         let footer = HStack([self.status], padding = 6.0)
-        self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.library_prompt, self.palette], spacing = 0.0)
+        self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
         self.body.layout().set_flex()
         self.actions.refresh(false)
         self.greet()
@@ -184,25 +179,16 @@ pub class Panels:
 
     # mark: libraries ===========================================================================
 
-    ## Library › New Library…: the folder to make it in, then its name.
+    ## Library › New Library…: one save panel names it and says where it
+    ## goes; the library is the folder <name>.library made there.
     func choose_new_library(self) -> unit!:
         let app = self.app else return
-        let parent = app.choose_folder("Choose the folder to make the new library in")
-        if parent == "":
+        let chosen = app.save_file("Name the new library and choose where to make it", "Photos")
+        if chosen == "":
             return
-        self.new_library_parent = parent
-        self.library_prompt.open(f"Name the new library in {paths.base(parent)}", "Photos", accept = "Create")
-
-    func create_library(self, typed: str) -> unit!:
-        var name = typed.trim()
-        if name.ends_with(".library"):
-            name = name[..<name.length - 8]
-        if name == "" or "/" in name or name.starts_with("."):
-            self.library_prompt.open("Name the new library (no slashes)", typed, accept = "Create")
-            return
-        let root = paths.join(self.new_library_parent, name + ".library")
+        let root = chosen if chosen.ends_with(".library") else chosen + ".library"
         if library.exists(root) and not library.exists(library.catalog_path(root)):
-            self.library_prompt.open(f"{name}.library is already a folder there; choose another name", name, accept = "Create")
+            self.tell(f"{paths.base(root)} is already a folder there and not a library; choose another name.")
             return
         self.open_library(root)
 
