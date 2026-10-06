@@ -1,0 +1,211 @@
+## The import's workers: several threads take the gathered files in turn and do
+## what is slow — reading, hashing, the metadata, copying the original, decoding
+## the preview, encoding the preview and thumbnail files — at once. What must
+## be decided one file at a time is decided under the job's lock: whether the
+## photo is already in the library (by SHA-256, its own import included), the
+## photo's id, and its file name in originals/ (no two take one name). Each file
+## ends in a Result the import thread commits to the catalog (importer.lucb).
+import c
+import memory
+import strings
+import sync
+import thread
+import time
+from luce_std import files
+from luce_std import paths
+from luce_std.collections import Buffer, List, TextPool
+from luce_crypto import native as crypto
+from luce_develop import source
+import catalog
+from catalog import Photo
+import facts
+import library
+
+## How a file went.
+pub enum Outcome:
+    added
+    skipped
+    failed
+
+## One file's end: the photo added (its text in the job's pool), or why not.
+pub struct Result:
+    pub var file: usize
+    pub var outcome: Outcome
+    pub var photo: Photo
+    pub var message: str
+
+## What the workers share; everything marked `under lock` only under `lock`.
+pub struct Job:
+    pub var lock: sync.Mutex
+    pub var ready: sync.Condition
+    pub var root: str
+    pub var files: const str[]
+    pub var next_file: @usize
+    ## Under lock: the library's photos before the import (for their hashes),
+    ## the hashes and file names this import has claimed, the next id, results
+    ## not taken yet, how many files are finished, and the text of both.
+    pub var known: catalog.Rows
+    pub var hashes: List[str]
+    pub var names: List[str]
+    pub var next_id: i64
+    pub var results: List[Result]
+    pub var finished: usize
+    pub var pool: TextPool
+    pub var cancelled: @bool
+
+    func holds(hash: str) -> bool:
+        for photo in self.known.photos.view():
+            if photo.sha256 == hash:
+                return true
+        for kept in self.hashes.view():
+            if kept == hash:
+                return true
+        return false
+
+    func claimed(relative: str) -> bool:
+        for kept in self.names.view():
+            if kept == relative:
+                return true
+        return false
+
+    pub func close():
+        self.known.close()
+        self.hashes.destroy()
+        self.names.destroy()
+        self.results.destroy()
+        self.pool.destroy()
+
+## A worker: take files until there are none, or the import is cancelled.
+pub func work(context: void*?):
+    let job = (Job*)(context else return)
+    while not job.cancelled.load(.acquire):
+        let at = job.next_file.add(1, .relaxed)
+        if at >= job.files.length:
+            return
+        var local: TextPool
+        defer local.destroy()
+        var result = Result(file = at, outcome = .failed)
+        result.outcome = import_file(job, job.files[at], &result.photo, &local) catch failure:
+            result.message = failure.message
+            recover Outcome.failed
+        job.lock.lock()
+        finish(job, &result)
+        job.lock.unlock()
+        job.ready.signal()
+
+## Keep `result`'s text in the job's pool and hand it to the import thread (under lock).
+func finish(job: Job*, result: Result*):
+    result.message = job.pool.keep_text(result.message.bytes) catch failure:
+        recover ""
+    if result.outcome == Outcome.added:
+        keep_photo(&result.photo, &job.pool) catch failure:
+            result.outcome = .failed
+            result.message = "out of memory"
+    job.results.append(*result) catch failure:
+        _ = failure
+    job.finished += 1
+
+func keep_photo(photo: Photo*, pool: TextPool*) -> !:
+    photo.path = try pool.keep_text(photo.path.bytes)
+    photo.name = try pool.keep_text(photo.name.bytes)
+    photo.kind = try pool.keep_text(photo.kind.bytes)
+    photo.sha256 = try pool.keep_text(photo.sha256.bytes)
+    photo.captured = try pool.keep_text(photo.captured.bytes)
+    photo.offset = try pool.keep_text(photo.offset.bytes)
+    photo.make = try pool.keep_text(photo.make.bytes)
+    photo.model = try pool.keep_text(photo.model.bytes)
+    photo.lens = try pool.keep_text(photo.lens.bytes)
+    photo.shutter = try pool.keep_text(photo.shutter.bytes)
+    photo.settings = try pool.keep_text(photo.settings.bytes)
+
+## Import the file at `file` into `photo`, its text in `local`.
+func import_file(job: Job*, file: str, photo: Photo*, local: TextPool*) -> Outcome!:
+    let terminated = try strings.copy(file)
+    defer strings.release(terminated)
+    let data = try files.read((c.str)terminated)
+    defer data.release()
+    let found = source.kind(data.value)
+    if found == source.Kind.unknown:
+        error(source.unsupported, "not a photo luced-photo reads")
+    var digest: u8[32]
+    _ = try crypto.digest(data.value, digest, "sha256")
+    var hex: u8[64]
+    for (at, byte) in digest.indexed():
+        hex[at * 2] = hex_digit(byte >> 4)
+        hex[at * 2 + 1] = hex_digit(byte & 15)
+    *photo = Photo(imported = time.unix())
+    photo.sha256 = try local.keep_text(hex)
+    try facts.describe(file, data.value, found, photo, local)
+    # The original's folder, by capture date: originals/YYYY/MM/DD/.
+    var relative: Buffer
+    defer relative.destroy()
+    try relative.put(b"originals/")
+    try relative.put(photo.captured.bytes[0..<4])
+    try relative.put_byte('/')
+    try relative.put(photo.captured.bytes[5..<7])
+    try relative.put_byte('/')
+    try relative.put(photo.captured.bytes[8..<10])
+    var path: Buffer
+    defer path.destroy()
+    try library.join_into(job.root, relative.text(), &path)
+    try files.ensure_directory(path.text())
+    try relative.put_byte('/')
+    # One file at a time: the duplicate check, the id and the name.
+    job.lock.lock()
+    let claim = claim_name(job, photo, &relative, &path) catch failure:
+        job.lock.unlock()
+        error(failure.code, failure.message)
+    job.lock.unlock()
+    if not claim:
+        return .skipped
+    photo.path = try local.keep_text(relative.view())
+    try library.join_into(job.root, photo.path, &path)
+    try files.write_atomic(try path.terminated(), data.value)
+    # The viewer's preview and the grid's thumbnail.
+    var preview = try source.preview(data.value, (usize)library.preview_edge, (u64)photo.orientation)
+    defer preview.close()
+    if photo.width == 0:
+        photo.width = preview.width()
+        photo.height = preview.height()
+    try library.cache_path(job.root, "previews", photo.id, &path)
+    try preview.save_jpeg(path.text(), 88)
+    var thumb = try preview.shrunk((usize)library.thumb_edge)
+    defer thumb.close()
+    try library.cache_path(job.root, "thumbs", photo.id, &path)
+    try thumb.save_jpeg(path.text(), 82)
+    return .added
+
+## Under lock: false when the library already holds the photo; else claim its
+## hash, an id and a free name, appended to `relative` (a folder ending in /):
+## the name itself, else name-2.ext, name-3.ext…
+func claim_name(job: Job*, photo: Photo*, relative: Buffer*, path: Buffer*) -> bool!:
+    if job.holds(photo.sha256):
+        return false
+    try job.hashes.append(try job.pool.keep_text(photo.sha256.bytes))
+    photo.id = job.next_id
+    job.next_id += 1
+    let folder = relative.length()
+    let stem = paths.stem(photo.name)
+    let extension = paths.extension(photo.name)
+    var attempt: i64 = 1
+    while true:
+        relative.truncate(folder)
+        try relative.put_text(stem)
+        if attempt > 1:
+            try relative.put_byte('-')
+            try relative.put_number(attempt)
+        try relative.put_text(extension)
+        try library.join_into(job.root, relative.text(), path)
+        if not job.claimed(relative.text()) and not files.exists(try path.terminated()):
+            try job.names.append(try job.pool.keep_text(relative.view()))
+            return true
+        attempt += 1
+
+func hex_digit(value: u8) -> u8:
+    return value + '0' if value < 10 else value - 10 + 'a'
+
+## How many workers an import of `count` files runs: a few, since each holds a
+## whole file and the JPEG coders spread over the processors themselves.
+pub func worker_count(count: usize) -> usize:
+    let most: usize = 4
+    return count if count < most else most

@@ -1,9 +1,10 @@
-## The importer: copies photos into the library on its own thread, so the window
-## never waits on a card or a disk. For each file under the paths it was given it
-## reads the bytes, skips a file whose SHA-256 the library already holds, reads
-## the metadata, copies the file to originals/YYYY/MM/DD/ by capture date, writes
-## the viewer preview and the grid thumbnail, and commits the photo's row; rows
-## commit a few at a time, so the grid fills in as the import goes.
+## The importer: copies photos into the library on threads of its own, so the
+## window never waits on a card or a disk. Its thread gathers the files under the
+## paths it was given and starts a few workers (import_worker.lucb); each file is
+## read, hashed (a photo the library holds is skipped), described, copied to
+## originals/YYYY/MM/DD/ by capture date and given its preview and thumbnail.
+## This thread commits the photos' rows as the workers finish them, a few at a
+## time, so the grid fills in as the import goes.
 ##
 ## The window polls events, one line each, fields separated by tabs:
 ##     found    total                       files to look at
@@ -24,7 +25,8 @@ from luce_prism import prism
 from luce_crypto import native as crypto
 from luce_develop import source
 import catalog
-from catalog import Photo
+import import_worker
+from import_worker import Job, Result
 from luce_std.collections import Buffer, TextPool, List
 import facts
 import library
@@ -82,44 +84,6 @@ struct Room:
         self.root.destroy()
         self.sources.destroy()
 
-## How a file went.
-enum Outcome:
-    added
-    skipped
-
-## The import thread's own state.
-struct Job:
-    var room: Room*
-    var store: prism.Store*
-    var root: str
-    ## The library's photos before the import, for their hashes.
-    var known: catalog.Rows
-    ## Hashes added by this import.
-    var added: List[str]
-    var pool: TextPool
-    var line: Buffer
-    var path: Buffer
-    var next: i64
-    var count_added: i64
-    var count_skipped: i64
-    var count_failed: i64
-
-    func close():
-        self.known.close()
-        self.added.destroy()
-        self.pool.destroy()
-        self.line.destroy()
-        self.path.destroy()
-
-    func holds(hash: str) -> bool:
-        for photo in self.known.photos.view():
-            if photo.sha256 == hash:
-                return true
-        for kept in self.added.view():
-            if kept == hash:
-                return true
-        return false
-
 ## The import thread: import every file the room names, then report.
 func serve(context: void*?):
     let room = (Room*)(context else return)
@@ -133,70 +97,119 @@ func serve(context: void*?):
         room.post(line.view())
     room.finish()
 
+## Counts and lines of the import as the workers' results arrive.
+struct Tally:
+    var added: i64
+    var skipped: i64
+    var failed: i64
+    var taken: usize
+    ## The id after the newest photo committed.
+    var next: i64
+    var line: Buffer
+    ## "added" lines wait here until their rows are committed, so the window can read them.
+    var pending: Buffer
+
+    func close():
+        self.line.destroy()
+        self.pending.destroy()
+
 func work(room: Room*) -> !:
     let store = room.store else error(prism.closed, "the importer has no catalog")
-    var job = Job(room = room, store = store, root = room.root.text(), known = try catalog.read(store))
-    defer job.close()
-    job.next = job.known.next
-    try library.ensure(job.root)
+    let root = room.root.text()
+    try library.ensure(root)
     var found: List[str]
     defer found.destroy()
     var names: TextPool
     defer names.destroy()
-    try gather(room.sources.text(), job.root, &found, &names)
-    job.line.clear()
-    try job.line.put(b"found\t")
-    try job.line.put_number((i64)found.length())
-    room.post(job.line.view())
+    try gather(room.sources.text(), root, &found, &names)
+    var tally: Tally
+    defer tally.close()
+    try tally.line.put(b"found\t")
+    try tally.line.put_number((i64)found.length())
+    room.post(tally.line.view())
+    var job = Job(root = root, files = found.view(), known = try catalog.read(store))
+    defer job.close()
+    job.next_id = job.known.next
+    tally.next = job.next_id
+    var workers: thread.Handle[4]
+    var started: usize = 0
+    for _at in 0..<import_worker.worker_count(found.length()):
+        workers[started] = thread.spawn(import_worker.work, (void*)&job, name = "luced-photo import worker") catch failure:
+            break
+        started += 1
     var batch = try catalog.Batch.begin(store)
     defer batch.close()
-    # "added" lines wait here until their rows are committed, so the window can read them.
-    var pending: Buffer
-    defer pending.destroy()
-    for (done, file) in found.view().indexed():
+    let total = found.length()
+    while tally.taken < total and started > 0:
         if room.is_cancelled():
+            job.cancelled.store(true, .release)
             break
-        job.line.clear()
-        let outcome = import_one(&job, file, &batch) catch failure:
-            job.count_failed += 1
-            try job.line.put(b"failed\t")
-            try put_field(&job.line, paths.base(file).bytes)
-            try job.line.put_byte('\t')
-            try put_field(&job.line, failure.message.bytes)
-            try progress(&job, done + 1, found.length())
-            room.post(job.line.view())
-            continue
-        if outcome == Outcome.skipped:
-            job.count_skipped += 1
-            try job.line.put(b"skipped\t")
-            try put_field(&job.line, paths.base(file).bytes)
-            try progress(&job, done + 1, found.length())
-            room.post(job.line.view())
-            continue
-        job.count_added += 1
-        try pending.put(b"added\t")
-        try pending.put_number(job.next - 1)
-        try progress_into(&pending, done + 1, found.length())
-        try pending.put_byte('\t')
-        try put_field(&pending, paths.base(file).bytes)
-        try pending.put_byte('\n')
-        if batch.count >= commit_every:
-            try batch.flush(store)
-            try post_lines(room, &pending)
+        try take_results(&job, &tally, &batch, store, room, total, true)
+    # Workers end with the file in hand; what they finished is still committed.
+    for at in 0..<started:
+        workers[at].join() catch failure:
+            _ = failure
+    try take_results(&job, &tally, &batch, store, room, total, false)
     try batch.commit()
-    try post_lines(room, &pending)
+    try post_lines(room, &tally.pending)
     try catalog.bake(store)
-    job.line.clear()
-    try job.line.put(b"done\t")
-    try job.line.put_number(job.count_added)
-    try job.line.put_byte('\t')
-    try job.line.put_number(job.count_skipped)
-    try job.line.put_byte('\t')
-    try job.line.put_number(job.count_failed)
-    room.post(job.line.view())
+    tally.line.clear()
+    try tally.line.put(b"done\t")
+    try tally.line.put_number(tally.added)
+    try tally.line.put_byte('\t')
+    try tally.line.put_number(tally.skipped)
+    try tally.line.put_byte('\t')
+    try tally.line.put_number(tally.failed)
+    room.post(tally.line.view())
 
-func progress(job: Job*, done: usize, total: usize) -> !:
-    try progress_into(&job.line, done, total)
+## Take the workers' finished files (waiting for one when `wait`), commit the
+## added photos' rows a few at a time and post what happened.
+func take_results(job: Job*, tally: Tally*, batch: catalog.Batch*, store: prism.Store*, room: Room*, total: usize, wait: bool) -> !:
+    var results: List[Result]
+    defer results.destroy()
+    job.lock.lock()
+    while wait and job.results.length() == 0:
+        job.ready.wait(&job.lock)
+    for result in job.results.view():
+        results.append(result) catch failure:
+            job.lock.unlock()
+            error(failure.code, failure.message)
+    job.results.clear()
+    job.lock.unlock()
+    for result in results.view():
+        tally.taken += 1
+        let name = paths.base(job.files[result.file])
+        tally.line.clear()
+        match result.outcome:
+            .failed:
+                tally.failed += 1
+                try tally.line.put(b"failed\t")
+                try put_field(&tally.line, name.bytes)
+                try tally.line.put_byte('\t')
+                try put_field(&tally.line, result.message.bytes)
+                try progress_into(&tally.line, tally.taken, total)
+                room.post(tally.line.view())
+            .skipped:
+                tally.skipped += 1
+                try tally.line.put(b"skipped\t")
+                try put_field(&tally.line, name.bytes)
+                try progress_into(&tally.line, tally.taken, total)
+                room.post(tally.line.view())
+            .added:
+                tally.added += 1
+                try batch.put(&result.photo)
+                if result.photo.id >= tally.next:
+                    tally.next = result.photo.id + 1
+                try batch.set_next(tally.next)
+                try tally.pending.put(b"added\t")
+                try tally.pending.put_number(result.photo.id)
+                try progress_into(&tally.pending, tally.taken, total)
+                try tally.pending.put_byte('\t')
+                try put_field(&tally.pending, name.bytes)
+                try tally.pending.put_byte('\n')
+                if batch.count >= commit_every:
+                    try batch.flush(store)
+                    try post_lines(room, &tally.pending)
 
 func progress_into(line: Buffer*, done: usize, total: usize) -> !:
     try line.put_byte('\t')
@@ -240,87 +253,11 @@ func gather(sources: str, root: str, found: List[str]*, names: TextPool*) -> !:
         elif source.is_photo_name(path):
             try found.append(try names.keep_text(path.bytes))
 
-## Import the file at `file`, adding its row to `batch`.
-func import_one(job: Job*, file: str, batch: catalog.Batch*) -> Outcome!:
-    let terminated = try strings.copy(file)
-    defer strings.release(terminated)
-    let data = try files.read((c.str)terminated)
-    defer data.release()
-    let found = source.kind(data.value)
-    if found == source.Kind.unknown:
-        error(source.unsupported, "not a photo luced-photo reads")
-    var digest: u8[32]
-    _ = try crypto.digest(data.value, digest, "sha256")
-    var hex: u8[64]
-    for (at, byte) in digest.indexed():
-        hex[at * 2] = hex_digit(byte >> 4)
-        hex[at * 2 + 1] = hex_digit(byte & 15)
-    if job.holds((str)hex[0..]):
-        return .skipped
-    var photo = Photo(id = job.next, imported = time.unix())
-    photo.sha256 = try job.pool.keep_text(hex)
-    try facts.describe(file, data.value, found, &photo, &job.pool)
-    # The original, by capture date: originals/YYYY/MM/DD/name, numbered on a clash.
-    var relative: Buffer
-    defer relative.destroy()
-    try relative.put(b"originals/")
-    try relative.put(photo.captured.bytes[0..<4])
-    try relative.put_byte('/')
-    try relative.put(photo.captured.bytes[5..<7])
-    try relative.put_byte('/')
-    try relative.put(photo.captured.bytes[8..<10])
-    try library.join_into(job.root, relative.text(), &job.path)
-    try files.ensure_directory(job.path.text())
-    try relative.put_byte('/')
-    try place(job, &relative, photo.name)
-    photo.path = try job.pool.keep_text(relative.view())
-    try library.join_into(job.root, photo.path, &job.path)
-    try files.write_atomic(try job.path.terminated(), data.value)
-    # The viewer's preview and the grid's thumbnail.
-    var preview = try source.preview(data.value, (usize)library.preview_edge, (u64)photo.orientation)
-    defer preview.close()
-    if photo.width == 0:
-        photo.width = preview.width()
-        photo.height = preview.height()
-    try library.cache_path(job.root, "previews", photo.id, &job.path)
-    try preview.save_jpeg(job.path.text(), 88)
-    var thumb = try preview.shrunk((usize)library.thumb_edge)
-    defer thumb.close()
-    try library.cache_path(job.root, "thumbs", photo.id, &job.path)
-    try thumb.save_jpeg(job.path.text(), 82)
-    try batch.put(&photo)
-    try job.added.append(photo.sha256)
-    job.next += 1
-    try batch.set_next(job.next)
-    return .added
-
-## Append to `relative` (a folder, ending in /) a file name for `name` not yet
-## taken there: the name itself, else name-2.ext, name-3.ext…
-func place(job: Job*, relative: Buffer*, name: str) -> !:
-    let folder = relative.length()
-    let stem = paths.stem(name)
-    let extension = paths.extension(name)
-    var attempt: i64 = 1
-    while true:
-        relative.truncate(folder)
-        try relative.put_text(stem)
-        if attempt > 1:
-            try relative.put_byte('-')
-            try relative.put_number(attempt)
-        try relative.put_text(extension)
-        try library.join_into(job.root, relative.text(), &job.path)
-        if not files.exists(try job.path.terminated()):
-            return
-        attempt += 1
-
 ## Append `data` as one tab-separated field: tabs and line breaks inside it become
 ## spaces, so the window may split event lines at tabs.
 func put_field(out: Buffer*, data: const u8[]) -> !:
     for byte in data:
         try out.put_byte(' ' if byte == '\t' or byte == '\n' or byte == '\r' else byte)
-
-func hex_digit(value: u8) -> u8:
-    return value + '0' if value < 10 else value - 10 + 'a'
 
 ## A running import.
 pub struct Importer:
