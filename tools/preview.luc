@@ -4,7 +4,6 @@
 ## the viewer's preview, then reads the frame back.
 import probe
 from app import LucedPhoto
-from luce_develop.settings import parse
 
 pub func main(arguments: list[str]) -> int!:
     let photo = LucedPhoto(arguments[1])
@@ -23,7 +22,7 @@ pub func main(arguments: list[str]) -> int!:
                 grid.select(position)
                 photo.panels.show_selection(position)
                 if develop != "":
-                    photo.panels.apply_develop(parse(develop))
+                    photo.panels.apply_develop(develop)
         if ticks == 90 and capture < 0:
             capture = 0
         if ticks > 200:

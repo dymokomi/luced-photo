@@ -8,7 +8,7 @@ from luce_window.input import Cursor
 from luce_std import math
 from luce_develop.renderer import Renderer
 from luce_develop import renderer
-from luce_develop.settings import Settings
+from luce_develop.settings import Look
 from thumbs import Loader
 import thumbs
 import library
@@ -39,9 +39,8 @@ pub class Viewer: Widget:
         self.panel = Panel("Viewer", self, minimum = Size(320.0, 240.0), closable = false, id = "viewer")
 
     ## Show photo `id`: its preview from `preview` at once, then the original at
-    ## `original` developed with `settings`.
-    pub func show(self, id: int, preview: str, original: str, settings: Settings) -> unit!:
-        self.developer.set_settings(settings)
+    ## `original`, developed with the look set by `set_look`.
+    pub func show(self, id: int, preview: str, original: str) -> unit!:
         if id == self.shown or id == self.wanted:
             self.box.invalidate()
             return
@@ -51,9 +50,9 @@ pub class Viewer: Widget:
         self.developer.clear()
         self.developer.open(original, develop_edge)
 
-    ## Develop with `settings` from the next frame on.
-    pub func set_settings(self, settings: Settings) -> unit!:
-        self.developer.set_settings(settings)
+    ## Develop with `look` from the next frame on.
+    pub func set_look(self, look: Look) -> unit!:
+        self.developer.set_look(look)
         self.box.invalidate()
 
     ## Show nothing.

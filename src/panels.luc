@@ -13,7 +13,6 @@ from viewer import Viewer
 from properties import PropertiesPane
 from rerender import Rerenderer
 import rerender
-from luce_develop.settings import Settings, parse, encode
 
 ## Ticks (of 0.05 s) a develop change waits for more before it is saved.
 let save_ticks: int = 10
@@ -56,8 +55,7 @@ pub class Panels:
         self.library_pane.on_pick = self.show_selection
         self.properties.develop.on_change = self.develop_changed
         self.viewer.on_developed = func (temperature: float, tint: float) -> unit!:
-            let controls = self.properties.develop
-            controls.show(controls.settings, temperature, tint)
+            self.properties.develop.set_shot(temperature, tint)
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_photos), Spacer(),
@@ -196,21 +194,20 @@ pub class Panels:
             return
         let index = self.library.index
         let id = index.id(lead)
-        let settings = parse(index.settings(lead))
         self.developing = id
-        self.properties.develop.show(settings, 5500.0, 0.0)
-        self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), settings)
+        self.properties.develop.show(index.settings(lead), 5500.0, 0.0)
+        self.viewer.set_look(self.properties.develop.look)
+        self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead))
 
     # mark: the develop =========================================================================
 
-    ## Develop the shown photo with `settings`, as if the user set them.
-    pub func apply_develop(self, settings: Settings) -> unit!:
-        let controls = self.properties.develop
-        controls.show(settings, 5500.0, 0.0)
-        self.develop_changed(settings)
+    ## Develop the shown photo with the settings `text`, as if the user set them.
+    pub func apply_develop(self, text: str) -> unit!:
+        self.properties.develop.show(text, 5500.0, 0.0)
+        self.develop_changed()
 
-    func develop_changed(self, settings: Settings) -> unit!:
-        self.viewer.set_settings(settings)
+    func develop_changed(self) -> unit!:
+        self.viewer.set_look(self.properties.develop.look)
         if self.developing >= 0:
             self.unsaved = self.developing
             self.unsaved_ticks = 0
@@ -221,7 +218,7 @@ pub class Panels:
             return
         let id = self.unsaved
         self.unsaved = -1
-        let text = encode(self.properties.develop.settings)
+        let text = self.properties.develop.look.text()
         self.library.save_settings(id, text) catch failure:
             self.tell(f"The develop was not saved: {failure.message}")
             return
@@ -258,6 +255,7 @@ pub class Panels:
     pub func poll(self) -> unit!:
         self.library_pane.tick()
         self.viewer.tick()
+        self.properties.develop.tick()
         self.take_import_events()
         var redone = self.rerenderer.take()
         while redone >= 0:

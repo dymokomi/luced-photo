@@ -1,135 +1,228 @@
-## The develop's controls in the Properties pane: White Balance, Exposure & Tone,
-## Color and View, each a titled run of sliders over luce-develop's settings.
-## Moving any slider calls `on_change` with the whole new settings; `show` puts a
-## photo's settings on the sliders without calling it.
-from luce_ui.ui import VStack, HStack, Text, Slider, Font, Rule, Widget, Menu, Command, Button
+## The develop's controls in the Properties pane, built from luce-develop's
+## parameter table: a collapsible section per table section (White Balance,
+## Exposure & Tone, Levels, Curves, Color, Color Mixer, Color Grading, Black &
+## White, Lens, Effects, View), a slider per parameter, and the few that are not
+## sliders (curves, the black-and-white switch, the view). The controls edit a
+## Look, luce-develop's settings object, and call `on_change` after every edit;
+## `show` loads a photo's settings without calling it.
+from luce_ui.ui import VStack, HStack, Text, Slider, Font, Widget, Menu, Command, Button, SectionHeader, CurveEditor, Checkbox, Spacer, Size
 from interop import Connection
-from luce_develop.settings import Settings, defaults
+from luce_develop.settings import Look, look
+from luce_develop import settings
+
+## The sections in the order they show; Curves has no sliders of its own.
+func section_order() -> list[str]:
+    return ["White Balance", "Exposure & Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Effects", "View"]
+
+## The sections that start open.
+func opened() -> list[str]:
+    return ["White Balance", "Exposure & Tone", "Color"]
+
+func curve_titles() -> list[str]:
+    return ["RGB", "R", "G", "B", "Luma"]
+
+## One collapsible section: its header and what it holds.
+class Section:
+    pub let title: str
+    pub let header: SectionHeader
+    pub let body: VStack
+    pub var open: bool
+
+    pub func init(self, title: str, rows: list[Widget], open: bool, font: Font) -> unit!:
+        self.title = title
+        self.header = SectionHeader(title, font = font)
+        self.body = VStack(rows, spacing = 6.0, padding = 6.0)
+        self.open = open
+        self.header.set_open(open)
+        self.body.layout().set_visible(open)
+
+    pub func toggle(self):
+        self.open = not self.open
+        self.header.set_open(self.open)
+        self.body.layout().set_visible(self.open)
 
 pub class DevelopControls:
     pub let body: VStack
-    let temperature: Slider
-    let tint: Slider
-    let exposure: Slider
-    let contrast: Slider
-    let highlights: Slider
-    let shadows: Slider
-    let whites: Slider
-    let blacks: Slider
-    let vibrance: Slider
-    let saturation: Slider
+    ## The settings the controls edit.
+    pub let look: Look
+    let sliders: map[str, Slider]
+    let sections: list[Section]
+    let curves: CurveEditor
+    var channel: int = 0
+    let channel_name: Text
+    let black_and_white: Checkbox
     let view_name: Text
-    let views: list[Command]
     var connections: list[Connection] = []
-    ## The settings on the sliders.
-    pub var settings: Settings
     ## The photo's as-shot white balance, which temperature 0 means.
     var shot_temperature: float = 5500.0
     var shot_tint: float = 0.0
-    ## While `show` moves the sliders, their changes are not the user's.
+    ## While `show` moves the controls, their changes are not the user's.
     var showing: bool = false
-    pub var on_change: func(Settings) -> unit!? = none
+    pub var on_change: func() -> unit!? = none
 
     pub func init(self, font: Font) -> unit!:
-        self.settings = defaults()
-        self.temperature = self.slider("Temperature", 2000.0, 12000.0, 5500.0, 0, font, func (value: float) -> unit!:
-            self.settings.temperature = value
-            # Leaving as-shot keeps its tint until the tint slider moves.
-            if self.settings.tint == 0.0:
-                self.settings.tint = self.shot_tint)
-        self.tint = self.slider("Tint", -150.0, 150.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.tint = value
-            if self.settings.temperature == 0.0:
-                self.settings.temperature = self.shot_temperature)
-        self.exposure = self.slider("Exposure", -5.0, 5.0, 0.0, 2, font, func (value: float) -> unit!:
-            self.settings.exposure = value)
-        self.contrast = self.slider("Contrast", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.contrast = value)
-        self.highlights = self.slider("Highlights", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.highlights = value)
-        self.shadows = self.slider("Shadows", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.shadows = value)
-        self.whites = self.slider("Whites", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.whites = value)
-        self.blacks = self.slider("Blacks", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.blacks = value)
-        self.vibrance = self.slider("Vibrance", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.vibrance = value)
-        self.saturation = self.slider("Saturation", -100.0, 100.0, 0.0, 0, font, func (value: float) -> unit!:
-            self.settings.saturation = value)
-        self.view_name = Text("Standard", font = font, muted = true)
-        self.views = [Command("Standard", id = "view_standard"), Command("Linear", id = "view_linear")]
-        for (at, command) in self.views.indexed():
-            let chosen = [1, 2][at]
-            self.connections.append(command.on_trigger(func () -> unit!:
-                self.settings.view = chosen
-                self.view_name.set_text(view_title(chosen))
-                self.changed()))
+        self.look = look("")
+        self.sliders = {}
+        self.sections = []
+        self.channel_name = Text("RGB", font = font, muted = true)
+        self.curves = CurveEditor()
+        self.curves.layout().set_limits(Size(200.0, 200.0), Size(320.0, 320.0))
+        self.black_and_white = Checkbox("Black & White", font = font)
+        self.view_name = Text("", font = font, muted = true)
+        var rows: map[str, list[Widget]] = {}
+        for title in section_order():
+            rows[title] = []
+        for at in 0..<settings.parameter_total():
+            let name = settings.name_of(at)
+            let section = settings.section_of(at)
+            if name == "view" or name == "bw":
+                continue
+            var held = rows[section] else []
+            held.append(self.slider(at, font))
+            rows[section] = held
+        self.add_special(rows, font)
+        var widgets: list[Widget] = []
+        for title in section_order():
+            let section = Section(title, (rows[title] else []) + [self.reset_button(title, font)], title in opened(), font)
+            self.sections.append(section)
+            widgets.append(section.header)
+            widgets.append(section.body)
+        self.body = VStack(widgets, spacing = 2.0)
+
+    ## The slider for table entry `at`, which sets its parameter on the look.
+    func slider(self, at: int, font: Font) -> Slider!:
+        let name = settings.name_of(at)
+        var low = settings.low_of(at)
+        var high = settings.high_of(at)
+        if name == "temperature":
+            low = 2000.0
+            high = 12000.0
+        let made = Slider(settings.label_of(at), low, high, settings.default_of(at), decimals = settings.decimals_of(at), font = font)
+        self.sliders[name] = made
+        self.connections.append(made.on_change(func (moved: float) -> unit!:
+            if self.showing:
+                return
+            self.look.set(name, moved)
+            # Leaving as-shot white balance keeps the as-shot value of the other.
+            if name == "temperature" and self.look.get("tint") == 0.0:
+                self.look.set("tint", self.shot_tint)
+            if name == "tint" and self.look.get("temperature") == 0.0:
+                self.look.set("temperature", self.shot_temperature)
+            self.changed()))
+        return made
+
+    ## The controls that are not sliders: As Shot, the curves, the black-and-white
+    ## switch and the view.
+    func add_special(self, rows: map[str, list[Widget]], font: Font) -> unit!:
         let as_shot = Button("As Shot", font = font)
         self.connections.append(as_shot.on_click(func () -> unit!:
-            self.settings.temperature = 0.0
-            self.settings.tint = 0.0
+            self.look.set("temperature", 0.0)
+            self.look.set("tint", 0.0)
             self.show_balance()
             self.changed()))
-        let reset = Button("Reset All", font = font)
-        self.connections.append(reset.on_click(func () -> unit!:
-            self.show(defaults(), self.shot_temperature, self.shot_tint)
+        rows["White Balance"] = (rows["White Balance"] else []) + [HStack([as_shot], spacing = 4.0)]
+        var channels: list[Widget] = []
+        for (at, title) in curve_titles().indexed():
+            let button = Button(title, font = font)
+            self.connections.append(button.on_click(func () -> unit!:
+                self.channel = at
+                self.channel_name.set_text(title)
+                self.show_curve()))
+            channels.append(button)
+        channels.append(self.channel_name)
+        self.connections.append(self.curves.on_change(func () -> unit!:
+            if self.showing:
+                return
+            var xs: list[float] = []
+            var ys: list[float] = []
+            for point in 0..<self.curves.point_count():
+                xs.append(self.curves.point_x(point))
+                ys.append(self.curves.point_y(point))
+            self.look.set_curve(self.channel, xs, ys)
             self.changed()))
-        let rows: list[Widget] = [
-            title("WHITE BALANCE", font), self.temperature, self.tint, HStack([as_shot], spacing = 4.0), Rule(),
-            title("EXPOSURE & TONE", font), self.exposure, self.contrast, self.highlights, self.shadows, self.whites, self.blacks, Rule(),
-            title("COLOR", font), self.vibrance, self.saturation, Rule(),
-            title("VIEW", font), HStack([Menu("Transform", self.views, font = font), self.view_name], spacing = 6.0),
-            HStack([reset], spacing = 4.0)]
-        self.body = VStack(rows, spacing = 6.0)
-
-    ## A slider whose moves `apply` takes into the settings, then reports.
-    func slider(self, text: str, low: float, high: float, value: float, decimals: int, font: Font, apply: func(float) -> unit!) -> Slider!:
-        let made = Slider(text, low, high, value, decimals = decimals, font = font)
-        self.connections.append(made.on_change(func (moved: float) -> unit!:
-            if not self.showing:
-                apply(moved)
+        rows["Curves"] = [HStack(channels, spacing = 4.0), self.curves]
+        self.connections.append(self.black_and_white.on_change(func (on: bool) -> unit!:
+            if self.showing:
+                return
+            self.look.set("bw", 1.0 if on else 0.0)
+            self.changed()))
+        rows["Black & White"] = [self.black_and_white] + (rows["Black & White"] else [])
+        var views: list[Command] = []
+        for (at, title) in ["ACES 2.0", "Standard", "Linear"].indexed():
+            let command = Command(title, id = f"view_{at}")
+            self.connections.append(command.on_trigger(func () -> unit!:
+                self.look.set("view", float(at))
+                self.view_name.set_text(title)
                 self.changed()))
-        return made
+            views.append(command)
+        rows["View"] = [HStack([Menu("Transform", views, font = font), self.view_name], spacing = 6.0)]
+
+    func reset_button(self, title: str, font: Font) -> Widget!:
+        let button = Button("Reset", font = font)
+        self.connections.append(button.on_click(func () -> unit!:
+            if title == "Curves":
+                for channel in 0..<5:
+                    self.look.set_curve(channel, [], [])
+            else:
+                self.look.reset_section(title)
+            self.show_values()
+            self.changed()))
+        return HStack([Spacer(), button], spacing = 4.0)
 
     func changed(self) -> unit!:
         if let tell = self.on_change:
-            tell(self.settings)
+            tell()
 
-    ## Put `settings` on the sliders; `shot_temperature` and `shot_tint` are the
-    ## photo's as-shot balance, shown while the settings keep it.
-    pub func show(self, settings: Settings, shot_temperature: float, shot_tint: float) -> unit!:
-        self.showing = true
-        self.settings = settings
+    ## Load `text` (a photo's settings in their text form) onto the controls; the
+    ## photo's as-shot balance is `shot_temperature` and `shot_tint`.
+    pub func show(self, text: str, shot_temperature: float, shot_tint: float) -> unit!:
+        self.look.load(text)
+        self.set_shot(shot_temperature, shot_tint)
+
+    ## The photo's as-shot white balance, known once its develop has loaded.
+    pub func set_shot(self, shot_temperature: float, shot_tint: float) -> unit!:
         self.shot_temperature = shot_temperature
         self.shot_tint = shot_tint
-        self.show_balance()
-        self.exposure.set_value(settings.exposure)
-        self.contrast.set_value(settings.contrast)
-        self.highlights.set_value(settings.highlights)
-        self.shadows.set_value(settings.shadows)
-        self.whites.set_value(settings.whites)
-        self.blacks.set_value(settings.blacks)
-        self.vibrance.set_value(settings.vibrance)
-        self.saturation.set_value(settings.saturation)
-        self.view_name.set_text(view_title(settings.view))
+        self.show_values()
+
+    func show_values(self) -> unit!:
+        self.showing = true
+        for (name, slider) in self.sliders:
+            slider.set_value(self.look.get(name))
+        self.black_and_white.set_checked(self.look.get("bw") > 0.5)
+        self.view_name.set_text(["ACES 2.0", "Standard", "Linear"][int(self.look.get("view"))])
         self.showing = false
+        self.show_balance()
+        self.show_curve()
 
     func show_balance(self) -> unit!:
         let was = self.showing
         self.showing = true
-        let as_shot = self.settings.temperature == 0.0
-        self.temperature.set_value(self.shot_temperature if as_shot else self.settings.temperature)
-        self.tint.set_value(self.shot_tint if as_shot else self.settings.tint)
+        let as_shot = self.look.get("temperature") == 0.0
+        if let temperature = self.sliders["temperature"]:
+            temperature.set_value(self.shot_temperature if as_shot else self.look.get("temperature"))
+        if let tint = self.sliders["tint"]:
+            tint.set_value(self.shot_tint if as_shot else self.look.get("tint"))
         self.showing = was
+
+    func show_curve(self) -> unit!:
+        let was = self.showing
+        self.showing = true
+        var xs: list[float] = []
+        var ys: list[float] = []
+        for point in 0..<self.look.curve_size(self.channel):
+            xs.append(self.look.curve_x(self.channel, point))
+            ys.append(self.look.curve_y(self.channel, point))
+        self.curves.set_points(xs, ys)
+        self.showing = was
+
+    ## Open or close sections whose headers were clicked; called on the window's timer.
+    pub func tick(self):
+        for section in self.sections:
+            if section.header.take_click():
+                section.toggle()
 
     pub func close(self):
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()
-
-func title(text: str, font: Font) -> Text!:
-    return Text(text, font = font, muted = true)
-
-func view_title(view: int) -> str:
-    return ["ACES 2.0", "Standard", "Linear"][view]
