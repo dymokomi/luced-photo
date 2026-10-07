@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix="luced-photo-preview-") as temporary:
     project = Path(temporary)
     shutil.copytree(ROOT / "src", project / "src")
     shutil.copy2(ROOT / "tools/preview.luc", project / "src/main.luc")
-    native = (ROOT.parent / "luce-gpu/tests/programs/gpu/native.lucb").read_text()
+    native = (ROOT.parent / "luce-gpu/tests/gpu/native.lucb").read_text()
     (project / "src/probe.lucb").write_text(native + "\n" + (ROOT / "tools/readback.lucb").read_text())
     manifest = (ROOT / "package.prisma").read_text()
     for name in [line.split('"')[1] for line in manifest.splitlines() if line.strip().startswith("def dependency")]:
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix="luced-photo-preview-") as temporary:
     (project / "package.prisma").write_text(manifest)
     binary = project / "preview"
     environment = dict(os.environ, LUCE_CACHE=str(ROOT / "build/cache"))
-    subprocess.run([os.environ.get("LUCE", str(ROOT.parent / "luce/build/luce")), "build", str(project / "src/main.luc"), "--native", "-o", str(binary)], check=True, env=environment, timeout=600)
+    subprocess.run([os.environ.get("LUCE") or shutil.which("luce") or str(ROOT.parent / "luce/build/luce"), "build", str(project / "src/main.luc"), "--native", "-o", str(binary)], check=True, env=environment, timeout=600)
     ppm = project / "preview.ppm"
     subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else ("expanded" if arguments.expanded else ("color" if arguments.color else ("zoom" if arguments.zoom else ("export" if arguments.export else ("undo" if arguments.undo else ("crop" if arguments.crop else ("presets" if arguments.presets else ("switch" if arguments.switch else ("wheel" if arguments.wheel else "")))))))))] + ([str(Path(arguments.export).resolve())] if arguments.export else []) + ([str(Path(arguments.switch).resolve())] if arguments.switch else []), check=True, timeout=120)
     header, dimensions, maximum, pixels = ppm.read_bytes().split(b"\n", 3)

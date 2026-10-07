@@ -14,18 +14,20 @@ pub class PropertiesPane:
     let library: PhotoLibrary
     let title: Text
     let camera: Text
-    let lens: Text
     let exposure: Text
     let captured: Text
     let file: Text
     let marks: Text
+    ## Stands in for the develop controls while no photo is selected.
+    let unselected: Text
+    ## The ratings, flags and labels, shown with a photo to give them to.
+    let marking: VStack
     var connections: list[Connection] = []
 
     pub func init(self, photos: PhotoLibrary, actions: Actions, font: Font) -> unit!:
         self.library = photos
         self.title = Text("No photo selected", font = font)
         self.camera = Text("", font = font, muted = true)
-        self.lens = Text("", font = font, muted = true)
         self.exposure = Text("", font = font, muted = true)
         self.captured = Text("", font = font, muted = true)
         self.file = Text("", font = font, muted = true)
@@ -40,10 +42,14 @@ pub class PropertiesPane:
         var labels: list[Widget] = []
         for (at, command) in actions.labels.indexed():
             labels.append(self.command_button(command, ["Red", "Yellow", "Green", "Blue", "None"][at], font))
-        let rows = VStack([self.histogram, self.title, self.captured, Rule(), self.develop.body, Rule(), Text("CAMERA", font = font, muted = true), self.camera, self.lens,
-                           self.exposure, self.file, Rule(), Text("MARKS", font = font, muted = true), self.marks,
-                           HStack(stars, spacing = 4.0), flags, HStack(labels, spacing = 4.0), Spacer()], spacing = 6.0, padding = 10.0)
+        self.unselected = Text("Select a photo to develop it.", font = font, muted = true)
+        # What the photo is, right under its name: camera and lens, exposure, when, file.
+        self.marking = VStack([Rule(), Text("MARKS", font = font, muted = true), self.marks, HStack(stars, spacing = 4.0), flags,
+                               HStack(labels, spacing = 4.0)], spacing = 6.0)
+        let rows = VStack([self.histogram, self.title, self.camera, self.exposure, self.captured, self.file, Rule(),
+                           self.unselected, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 10.0)
         self.panel = Panel("Properties", ScrollView(rows), minimum = Size(260.0, 200.0), closable = false, id = "properties")
+        self.show(-1, 0)
 
     func command_button(self, command: Command, text: str, font: Font) -> Button!:
         let button = Button(text, font = font)
@@ -60,18 +66,23 @@ pub class PropertiesPane:
     ## Show the photo at `at` of the library's index (-1 for none), and how many
     ## photos are selected.
     pub func show(self, at: int, selected: int) -> unit!:
-        if at < 0:
+        let chosen = at >= 0
+        self.unselected.layout().set_visible(not chosen)
+        self.develop.body.layout().set_visible(chosen)
+        self.marking.layout().set_visible(chosen)
+        self.histogram.layout().set_visible(chosen)
+        for line in [self.camera, self.exposure, self.captured, self.file]:
+            line.layout().set_visible(chosen)
+        if not chosen:
             self.title.set_text("No photo selected")
-            for line in [self.camera, self.lens, self.exposure, self.captured, self.file, self.marks]:
-                line.set_text("")
+            self.marks.set_text("")
             return
         let index = self.library.index
         self.title.set_text(index.name(at) if selected <= 1 else f"{index.name(at)} and {selected - 1} more")
         self.captured.set_text(index.captured(at).replace("T", "  "))
-        let make = index.make(at)
-        let model = index.model(at)
-        self.camera.set_text(model if model.starts_with(make) else f"{make} {model}".trim())
-        self.lens.set_text(index.lens(at))
+        let camera = camera_name(index.make(at), index.model(at))
+        let lens = index.lens(at)
+        self.camera.set_text(f"{camera}  ·  {lens}" if camera != "" and lens != "" else (camera if camera != "" else lens))
         var parts: list[str] = []
         if index.shutter(at) != "":
             parts.append(index.shutter(at))
@@ -93,6 +104,17 @@ pub class PropertiesPane:
             connection.disconnect()
         self.connections.clear()
 
+## The camera as people name it: the maker's first word once, then the model.
+## "NIKON CORPORATION" + "NIKON D800" is "NIKON D800"; "FUJIFILM" + "X-T2" is
+## "FUJIFILM X-T2"; "Canon" + "Canon EOS R5" is "Canon EOS R5".
+pub func camera_name(make: str, model: str) -> str:
+    let maker = make.trim().split(" ")[0]
+    if maker == "":
+        return model.trim()
+    if model.lower().starts_with(maker.lower()):
+        return model.trim()
+    return f"{maker} {model.trim()}".trim()
+
 ## `value` with one decimal, or none when it is whole: 2.8, 35.
 func decimal(value: float) -> str:
     let tenths = int(value * 10.0 + 0.5)
@@ -100,3 +122,10 @@ func decimal(value: float) -> str:
 
 func megabytes(count: int) -> str:
     return decimal(float(count) / 1048576.0)
+
+test "cameras are named as people name them":
+    assert(camera_name("NIKON CORPORATION", "NIKON D800") == "NIKON D800")
+    assert(camera_name("FUJIFILM", "X-T2") == "FUJIFILM X-T2")
+    assert(camera_name("Canon", "Canon EOS R5") == "Canon EOS R5")
+    assert(camera_name("OLYMPUS IMAGING CORP.", "E-M10") == "OLYMPUS E-M10")
+    assert(camera_name("", "iPhone 8") == "iPhone 8")

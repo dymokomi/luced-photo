@@ -59,7 +59,7 @@ pub class Panels:
         self.export_dialog.ask_target = func (name: str) -> str!:
             let app = self.app else return ""
             return app.save_file("Export to", name)
-        self.library_pane = LibraryPane(self.library, font)
+        self.library_pane = LibraryPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
         self.status = Text("", font = font, muted = true)
@@ -110,7 +110,7 @@ pub class Panels:
         self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
         self.dock.set_fraction(self.viewer.panel, 0.7)
         self.dock.add(self.presets.panel, self.library_pane.panel, DockPosition.bottom)
-        self.dock.set_fraction(self.library_pane.panel, 0.72)
+        self.dock.set_fraction(self.library_pane.panel, 0.82)
         self.dock.layout().set_flex()
         let footer = HStack([self.status], padding = 6.0)
         self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
@@ -229,7 +229,7 @@ pub class Panels:
     func greet(self) -> unit!:
         let total = self.library.index.total()
         let name = paths.stem(self.library.root)
-        self.tell(f"{name} is empty: Library › Import Photos… or drop photos on the grid." if total == 0 else f"{total} photos in {name}")
+        self.tell(f"{name}: no photos yet" if total == 0 else f"{total} photos in {name}")
 
     # mark: importing ===========================================================================
 
