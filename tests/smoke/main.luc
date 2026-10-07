@@ -1,0 +1,11 @@
+## The app made and drawing three frames on a fresh library in HOME (luc test gives each
+## test program a scratch HOME, so no real library or remembered setting is touched).
+from app import LucedPhoto
+from luce_std import files, paths
+
+pub func main(arguments: list[str]) -> int!:
+    let photo = LucedPhoto(paths.join(files.home_directory(), "Smoke.library"))
+    photo.run(["luced-photo", "--smoke"])
+    photo.close()
+    print("PASS smoke: the app drew three frames on a fresh library")
+    return 0
