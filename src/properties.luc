@@ -47,7 +47,7 @@ pub class PropertiesPane:
         self.marking = VStack([Rule(), Text("MARKS", font = font, muted = true), self.marks, HStack(stars, spacing = 4.0), flags,
                                HStack(labels, spacing = 4.0)], spacing = 6.0)
         let rows = VStack([self.histogram, self.title, self.camera, self.exposure, self.captured, self.file, Rule(),
-                           self.unselected, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 10.0)
+                           self.unselected, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 6.0)
         self.panel = Panel("Properties", ScrollView(rows), minimum = Size(260.0, 200.0), closable = false, id = "properties")
         self.show(-1, 0)
 
