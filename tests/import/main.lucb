@@ -1,0 +1,91 @@
+## Import photos into a fresh library twice: the first import adds every photo, the
+## second finds each already there (by SHA-256) and adds none. The photos are the
+## files named on the command line, or by default a Leica DNG and a Fuji X-Trans RAF
+## from luce-raw's sample raws checked out beside this package (skipped, with the
+## reason, when they are not there). The library is a temporary folder under build/,
+## removed after. Prints the catalog left and PASS, or what went wrong.
+import c
+import interop
+import strings
+import thread
+from luce_prism import prism
+from luce_std import files
+import importer
+import photo_index
+import library
+
+let samples: str[2] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf"]
+
+## How an import went: photos added and skipped.
+struct Counts:
+    var added: i64
+    var skipped: i64
+
+func run_import(store: interop.Reference[prism.Store], root: str, sources: const str[]) -> Counts!:
+    let running = try importer.start(store, root, sources)
+    defer running.release()
+    let held = try running.get()
+    var counts = Counts()
+    while true:
+        let finished = held.finished()
+        let events = try held.poll()
+        var first: usize = 0
+        while first < events.length:
+            var end = first
+            while end < events.length and events.bytes[end] != '\n':
+                end += 1
+            let line = (str)events.bytes[first..<end]
+            first = end + 1
+            if line.length >= 6 and (str)line.bytes[..<6] == "added\t":
+                counts.added += 1
+            elif line.length >= 8 and (str)line.bytes[..<8] == "skipped\t":
+                counts.skipped += 1
+            elif line.length >= 7 and (str)line.bytes[..<7] == "failed\t":
+                print(f"failed: {line}")
+        if finished:
+            break
+        thread.sleep(20)
+    held.close()
+    return counts
+
+func present(path: str) -> bool!:
+    let terminated = try strings.copy(path)
+    defer strings.release(terminated)
+    return files.exists((c.str)terminated)
+
+func check(root: str, sources: const str[]) -> bool!:
+    try library.ensure(root)
+    let catalog_path = try library.catalog_path(root)
+    defer catalog_path.release()
+    let store = try prism.Store.open(catalog_path.value)
+    defer store.release()
+    let first = try run_import(store, root, sources)
+    let second = try run_import(store, root, sources)
+    let index = try photo_index.read_index(store)
+    defer index.release()
+    let shown = try index.get()
+    for at in 0..<shown.count():
+        print(f"{shown.id(at)}  {shown.path(at)}  {shown.kind(at)}  {shown.captured(at)}  {shown.width(at)}x{shown.height(at)}")
+    (try store.get()).close()
+    let wanted = (i64)sources.length
+    if first.added != wanted or second.added != 0 or second.skipped != wanted or shown.count() != wanted:
+        print(f"FAIL import: first added {first.added}, second added {second.added} and skipped {second.skipped}, library holds {shown.count()}; wanted {wanted}, 0, {wanted}, {wanted}")
+        return false
+    print(f"PASS import: {wanted} photos, the second import found each already there")
+    return true
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length > 2:
+        return 0 if try check(arguments[1], arguments[2..]) else 1
+    for sample in samples:
+        if not try present(sample):
+            print("skip: no sample raws in ../luce-raw/build/samples (luce-raw/tests/run.py fetches them)")
+            return 0
+    try files.ensure_directory("build")
+    let folder = try files.create_temporary_directory("build")
+    defer folder.release()
+    let terminated = try strings.copy(folder.value)
+    defer strings.release(terminated)
+    defer files.remove_tree((c.str)terminated) catch failure:
+        _ = failure
+    return 0 if try check(folder.value, samples) else 1

@@ -1,7 +1,10 @@
-## Presets round-trip through a fresh catalog at the first argument (a folder
-## that need not exist): save, save again by the same name, rename, delete,
-## and read back after reopening. Prints PASS or traps.
+## Presets round-trip through a fresh catalog: save, save again by the same name,
+## rename, delete, and read back after reopening. The catalog is made in the folder
+## given, or in a temporary folder under build/ that is removed after. Prints PASS
+## or traps.
+import c
 import interop
+import strings
 from luce_prism import prism
 from luce_std import files
 from luce_std import paths
@@ -11,11 +14,23 @@ func names(store: interop.Reference[prism.Store]) -> interop.Reference[presets.P
     return try presets.read_presets(store)
 
 pub func main(arguments: str[]) -> i32!:
-    if arguments.length < 2:
-        print("usage: presets_check FOLDER")
-        return 2
-    try files.ensure_directory(arguments[1])
-    let path = try paths.join(arguments[1], "presets.prism")
+    if arguments.length > 1:
+        try files.ensure_directory(arguments[1])
+        try check(arguments[1])
+        return 0
+    try files.ensure_directory("build")
+    let folder = try files.create_temporary_directory("build")
+    defer folder.release()
+    let terminated = try strings.copy(folder.value)
+    defer strings.release(terminated)
+    defer files.remove_tree((c.str)terminated) catch failure:
+        _ = failure
+    try check(folder.value)
+    return 0
+
+## The round trip, in `folder`.
+func check(folder: str) -> !:
+    let path = try paths.join(folder, "presets.prism")
     defer path.release()
     var store = try prism.Store.open(path.value)
     var list = try names(store)
@@ -50,4 +65,3 @@ pub func main(arguments: str[]) -> i32!:
     (try store.get()).close()
     store.release()
     print("PASS presets save, replace, rename, delete and reopen")
-    return 0
