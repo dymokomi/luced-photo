@@ -72,7 +72,8 @@ class Section:
 
     pub func init(self, title: str, specs: list[ParameterSpec], extra: VStack?, font: Font) -> unit!:
         self.title = title
-        self.panel = ParameterPanel(specs, font = font, label_width = label_width)
+        # No margin of its own: its headings line up with the histogram above.
+        self.panel = ParameterPanel(specs, font = font, label_width = label_width, margin = 0.0)
         var names: list[str] = []
         for spec in specs:
             names.append(spec.name)
