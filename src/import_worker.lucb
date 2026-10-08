@@ -85,8 +85,10 @@ pub func work(context: void*?):
         var local: TextPool
         defer local.destroy()
         var result = Result(file = at, outcome = .failed)
+        # The failure's message lives only as long as its handler; finish() keeps a copy of this one.
+        var held: u8[256]
         result.outcome = import_file(job, job.files[at], &result.photo, &local) catch failure:
-            result.message = failure.message
+            result.message = strings.copy_into(held, failure.message)
             recover Outcome.failed
         job.lock.lock()
         finish(job, &result)
