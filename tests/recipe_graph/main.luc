@@ -1,0 +1,121 @@
+## The Recipe graph driven through its events on a fresh library in HOME: a
+## press picks a stage and Properties shows only its sections; the left strip
+## bypasses it and the right one displays it; Alt on an input cuts its wire and
+## a drag from an output to an input wires it again (media must match); a Y
+## drag cuts the wires it crosses; Delete removes the picked stage; Tab's menu
+## adds one; a mode replaces the graph and the stock. Prints PASS or traps.
+from app import LucedPhoto
+from luce_ui.ui import Event
+from luce_window.input import EventKind, Key
+from luce_std import files, paths
+from recipe_view import RecipeView, node_width, node_height
+from luce_develop.settings import Look
+
+## Stages as recipe.lucb numbers them.
+let exposure: int = 2
+let lens: int = 3
+let film: int = 5
+let develop: int = 6
+let scan: int = 7
+let grade: int = 8
+let print_stage: int = 9
+let project: int = 10
+let easel: int = 13
+
+## Where (dx, dy) from stage `stage`'s corner is on screen: the view starts
+## unframed, at zoom 1 with the graph's origin at (40, 20).
+func at(look: Look, stage: int, dx: float, dy: float) -> (float, float):
+    return (40.0 + look.stage_x(stage) + dx, 20.0 + look.stage_y(stage) + dy)
+
+func press(view: RecipeView, x: float, y: float, alt: bool = false) -> unit!:
+    view.event(Event(kind = EventKind.pointer_down, x = x, y = y, button = 0, inside = true, alt = alt))
+    view.event(Event(kind = EventKind.pointer_up, x = x, y = y, button = 0, inside = true))
+
+func drag(view: RecipeView, x0: float, y0: float, x1: float, y1: float) -> unit!:
+    view.event(Event(kind = EventKind.pointer_down, x = x0, y = y0, button = 0, inside = true))
+    view.event(Event(kind = EventKind.pointer_moved, x = (x0 + x1) * 0.5, y = (y0 + y1) * 0.5, inside = true))
+    view.event(Event(kind = EventKind.pointer_moved, x = x1, y = y1, inside = true))
+    view.event(Event(kind = EventKind.pointer_up, x = x1, y = y1, button = 0, inside = true))
+
+func key(view: RecipeView, which: Key) -> unit!:
+    view.event(Event(kind = EventKind.key_down, key = which))
+    view.event(Event(kind = EventKind.key_up, key = which))
+
+pub func main(arguments: list[str]) -> int!:
+    let app = LucedPhoto(paths.join(files.home_directory(), "Recipe.library"))
+    let panels = app.panels
+    let view = panels.recipe.view
+    let controls = panels.properties.develop
+    let look = controls.look
+    var changes = 0
+    view.on_change = func () -> unit!:
+        controls.show_values()
+        changes += 1
+    # Television: File, White Balance, Exposure, Film, Develop, Scan, Grade,
+    # View and Easel, Easel displayed; nothing picked, so no controls show.
+    assert(look.has_stage(scan) and not look.has_stage(print_stage) and not look.has_stage(lens) and look.display_stage() == easel)
+    assert(not controls.section_shown("Scan") and not controls.section_shown("Film"))
+
+    # A press on Film picks it; Properties shows only Film's sections.
+    let (film_x, film_y) = at(look, film, node_width * 0.5, node_height * 0.5)
+    press(view, film_x, film_y)
+    assert(view.picked == film)
+    assert(controls.section_shown("Film") and not controls.section_shown("Exposure") and not controls.section_shown("Tone"))
+
+    # A drag on it moves it, one change.
+    let before = changes
+    let film_left = look.stage_x(film)
+    drag(view, film_x, film_y, film_x + 40.0, film_y)
+    assert(look.stage_x(film) == film_left + 40.0 and changes == before + 1)
+
+    # Exposure's left strip bypasses it; its right strip displays it; back to Easel.
+    let (exposure_left, exposure_y) = at(look, exposure, 5.0, node_height * 0.5)
+    press(view, exposure_left, exposure_y)
+    assert(look.stage_bypassed(exposure) and not look.stage_active(exposure))
+    press(view, exposure_left, exposure_y)
+    assert(not look.stage_bypassed(exposure))
+    let (exposure_right, _) = at(look, exposure, node_width - 4.0, 0.0)
+    press(view, exposure_right, exposure_y)
+    assert(look.display_stage() == exposure)
+    view.display(easel)
+
+    # Alt on Develop's input cuts its wire; a drag from Film's output wires it again.
+    let (develop_in, develop_y) = at(look, develop, node_width * 0.5, -2.0)
+    press(view, develop_in, develop_y, alt = true)
+    assert(look.stage_source(develop) == -1 and not look.recipe_works())
+    let (film_out, film_mid) = at(look, film, node_width * 0.5, node_height + 2.0)
+    drag(view, film_out, film_mid, develop_in, develop_y)
+    assert(look.stage_source(develop) == film and look.recipe_works())
+    # Light does not wire into a stage that takes film.
+    let (exposure_out, exposure_bottom) = at(look, exposure, node_width * 0.5, node_height + 2.0)
+    let (scan_in, scan_y) = at(look, scan, node_width * 0.5, -2.0)
+    drag(view, exposure_out, exposure_bottom, scan_in, scan_y)
+    assert(look.stage_source(scan) == develop)
+
+    # Y and a drag across the wire into Grade cuts it.
+    let (grade_in, grade_y) = at(look, grade, node_width * 0.5, -12.0)
+    view.event(Event(kind = EventKind.key_down, key = Key.y))
+    drag(view, grade_in - 30.0, grade_y, grade_in + 30.0, grade_y)
+    view.event(Event(kind = EventKind.key_up, key = Key.y))
+    assert(look.stage_source(grade) == -1)
+    assert(look.connect(scan, grade))
+
+    # Delete removes the picked stage; the menu adds it back after the picked one.
+    let (grade_x, grade_middle) = at(look, grade, node_width * 0.5, node_height * 0.5)
+    press(view, grade_x, grade_middle)
+    key(view, Key.delete)
+    assert(not look.has_stage(grade) and view.picked == -1)
+    let (scan_x, scan_middle) = at(look, scan, node_width * 0.5, node_height * 0.5)
+    press(view, scan_x, scan_middle)
+    view.add_at_pointer(grade)
+    assert(look.has_stage(grade) and look.stage_source(grade) == scan and view.picked == grade)
+
+    # Cinema: printed and projected, its stock; a bypass keeps the values.
+    view.use_mode(1)
+    assert(look.has_stage(print_stage) and look.has_stage(project) and not look.has_stage(scan))
+    assert(look.get("film_stock") == 1.0 and look.display_stage() == easel)
+    # The picked stage is gone with the old graph: nothing shows.
+    assert(not controls.section_shown("Film") and not controls.section_shown("Scan"))
+    app.close()
+    print("PASS recipe: picking shows a stage's sections, strips bypass and display, wires cut and connect by medium, Y cuts, Delete and the menu remove and add, a mode replaces the graph")
+    return 0

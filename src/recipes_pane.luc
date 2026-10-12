@@ -1,16 +1,20 @@
-## The Presets pane: named develop settings, by name. A click on a preset
-## stacks it on the selected photos (develop_session.luc says how). The
-## footer saves the developed photo's settings as a new preset, saves them
-## over the chosen one, renames it and deletes it; the row's menu (right-click)
-## does the same for the row pressed. The presets live in the catalog
-## (presets.lucb), so they travel with the library. After them come the film
-## looks luce-develop provides ("Film · …"), applied the same way and fixed.
+## The Recipes pane: the modes a recipe starts from (Television, Cinema, Slide,
+## Black & White: a graph of stages and a stock), the library's saved recipes
+## (a photo's recipe with every stage's values), and the film looks luce-develop
+## provides ("Film · …"). A click stacks the row on the selected photos
+## (develop_session.luc says how): a mode replaces their recipe and stock and
+## keeps their values. The footer saves the developed photo's recipe as a new
+## one, saves it over the chosen one, renames it and deletes it; the row's menu
+## (right-click) does the same for the row pressed. Saved recipes live in the
+## catalog (recipes.lucb), so they travel with the library.
 from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
 from interop import Connection
 from photo_library import PhotoLibrary
 from luce_develop import film
+from luce_develop import recipe
+from luce_develop import settings
 
-pub class PresetsPane:
+pub class RecipesPane:
     pub let panel: Panel
     let library: PhotoLibrary
     let rows: ListView
@@ -23,16 +27,16 @@ pub class PresetsPane:
     let delete_command: Command
     let font: Font
     var connections: list[Connection] = []
-    ## What the prompt asks for: "save" a new preset's name or "rename" the
-    ## preset with id `renaming`.
+    ## What the prompt asks for: "save" a new recipe's name or "rename" the
+    ## recipe with id `renaming`.
     var asking: str = ""
     var renaming: int = -1
-    ## The settings a new preset takes: the photo's when Save was pressed.
+    ## The settings a new recipe takes: the photo's when Save was pressed.
     var pending: str = ""
     var deleting: int = -1
-    ## The developed photo's settings as a preset holds them, none without one.
+    ## The developed photo's settings as a saved recipe holds them, none without one.
     pub var current: func() -> str?!? = none
-    ## A preset was clicked: its name and settings.
+    ## A row was clicked: its name and settings.
     pub var on_apply: func(str, str) -> unit!? = none
     pub var on_status: func(str) -> unit!? = none
 
@@ -42,10 +46,10 @@ pub class PresetsPane:
         self.rows = ListView([], font = font)
         self.rows.layout().set_flex()
         self.connections.append(self.rows.on_activate(self.apply))
-        self.apply_command = Command("Apply to Selected Photos", id = "preset_apply")
-        self.update_command = Command("Update with Current Settings", id = "preset_update")
-        self.rename_command = Command("Rename Preset…", id = "preset_rename")
-        self.delete_command = Command("Delete Preset…", id = "preset_delete")
+        self.apply_command = Command("Apply to Selected Photos", id = "recipe_apply")
+        self.update_command = Command("Update with Current Recipe", id = "recipe_update")
+        self.rename_command = Command("Rename Recipe…", id = "recipe_rename")
+        self.delete_command = Command("Delete Recipe…", id = "recipe_delete")
         self.connections.append(self.apply_command.on_trigger(func () -> unit!:
             self.apply(self.rows.selected_index())))
         self.connections.append(self.update_command.on_trigger(self.update_chosen))
@@ -61,7 +65,7 @@ pub class PresetsPane:
         content.layout().set_flex()
         let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("save", self.update_chosen),
                            self.shelf_button("text-tool", self.rename_chosen), Spacer(), self.shelf_button("trash", self.delete_chosen)])
-        self.panel = Panel("Presets", content, minimum = Size(220.0, 120.0), closable = false, footer = shelf, id = "presets")
+        self.panel = Panel("Recipes", content, minimum = Size(220.0, 120.0), closable = false, footer = shelf, id = "recipes")
         self.show()
 
     func shelf_button(self, icon: str, callback: func() -> unit!) -> Button!:
@@ -71,24 +75,27 @@ pub class PresetsPane:
         button.layout().set_size(self.font.line_height() + 3.0, self.font.line_height() + 3.0)
         return button
 
-    ## List the library's presets, keeping the chosen one chosen.
+    ## List the modes, the library's recipes and the film looks, keeping the
+    ## chosen recipe chosen.
     pub func show(self, chosen_id: int = -1) -> unit!:
-        let presets = self.library.presets
+        let recipes = self.library.recipes
         var items: list[ListItem] = []
-        for at in 0..<presets.count():
-            items.append(ListItem(text = presets.name(at)))
+        for at in 0..<recipe.mode_total():
+            items.append(ListItem(text = f"Mode · {recipe.mode_name(at)}"))
+        for at in 0..<recipes.count():
+            items.append(ListItem(text = recipes.name(at)))
         for at in 0..<film.look_count():
             items.append(ListItem(text = film.look_name(at)))
         self.rows.set_items(items)
-        for at in 0..<presets.count():
-            if presets.id(at) == chosen_id:
-                self.rows.select(at)
-        self.panel.set_text("Presets" if presets.count() == 0 else f"Presets · {presets.count()}")
+        for at in 0..<recipes.count():
+            if recipes.id(at) == chosen_id:
+                self.rows.select(recipe.mode_total() + at)
+        self.panel.set_text("Recipes" if recipes.count() == 0 else f"Recipes · {recipes.count()}")
 
-    ## The preset chosen in the list, or -1.
+    ## The library's recipe chosen in the list (its position), or -1.
     func chosen(self) -> int:
-        let at = self.rows.selected_index()
-        return at if at >= 0 and at < self.library.presets.count() else -1
+        let at = self.rows.selected_index() - recipe.mode_total()
+        return at if at >= 0 and at < self.library.recipes.count() else -1
 
     func fit_menu(self) -> unit!:
         let own = self.chosen() >= 0
@@ -104,15 +111,19 @@ pub class PresetsPane:
         self.tell("Select a photo whose settings to keep.")
         return none
 
-    ## Stack the preset at `at` (or the film look after the presets) on the
-    ## selected photos, as a click does.
+    ## Stack row `at` (a mode, a recipe or a film look) on the selected
+    ## photos, as a click does.
     pub func apply(self, at: int) -> unit!:
-        let presets = self.library.presets
+        let recipes = self.library.recipes
         let tell = self.on_apply else return
-        if at >= 0 and at < presets.count():
-            tell(presets.name(at), presets.settings(at))
-        elif at >= presets.count() and at < presets.count() + film.look_count():
-            tell(film.look_name(at - presets.count()), film.look_text(at - presets.count()))
+        let modes = recipe.mode_total()
+        if at >= 0 and at < modes:
+            tell(recipe.mode_name(at), settings.mode_text(at))
+        elif at >= modes and at < modes + recipes.count():
+            tell(recipes.name(at - modes), recipes.settings(at - modes))
+        elif at >= modes + recipes.count() and at < modes + recipes.count() + film.look_count():
+            let look = at - modes - recipes.count()
+            tell(film.look_name(look), film.look_text(look))
 
     # mark: saving =============================================================================
 
@@ -120,26 +131,26 @@ pub class PresetsPane:
         let text = self.current_settings() else return
         self.pending = text
         self.asking = "save"
-        self.prompt.open("Save the photo’s settings as a preset named", self.free_name(), accept = "Save")
+        self.prompt.open("Save the photo’s recipe as", self.free_name(), accept = "Save")
 
     func update_chosen(self) -> unit!:
         let at = self.chosen()
         if at < 0:
-            self.tell("Choose one of your presets to update.")
+            self.tell("Choose one of your recipes to update.")
             return
         let text = self.current_settings() else return
-        let name = self.library.presets.name(at)
-        let id = self.library.save_preset(name, text)
+        let name = self.library.recipes.name(at)
+        let id = self.library.save_recipe(name, text)
         self.show(id)
-        self.tell(f"Updated “{name}” with the photo’s settings.")
+        self.tell(f"Updated “{name}” with the photo’s recipe.")
 
     func rename_chosen(self) -> unit!:
         let at = self.chosen()
         if at < 0:
             return
         self.asking = "rename"
-        self.renaming = self.library.presets.id(at)
-        self.prompt.open("Rename the preset", self.library.presets.name(at), accept = "Rename")
+        self.renaming = self.library.recipes.id(at)
+        self.prompt.open("Rename the recipe", self.library.recipes.name(at), accept = "Rename")
 
     func submitted(self, typed: str) -> unit!:
         let name = typed.trim()
@@ -148,25 +159,25 @@ pub class PresetsPane:
         if name == "":
             return
         if asking == "save":
-            let replacing = self.library.presets.position_of_name(name) >= 0
-            let id = self.library.save_preset(name, self.pending)
+            let replacing = self.library.recipes.position_of_name(name) >= 0
+            let id = self.library.save_recipe(name, self.pending)
             self.show(id)
-            self.tell(f"Updated “{name}”." if replacing else f"Saved the preset “{name}”.")
+            self.tell(f"Updated “{name}”." if replacing else f"Saved the recipe “{name}”.")
         elif asking == "rename":
-            let taken = self.library.presets.position_of_name(name)
-            if taken >= 0 and self.library.presets.id(taken) != self.renaming:
-                self.tell(f"A preset is already named “{name}”.")
+            let taken = self.library.recipes.position_of_name(name)
+            if taken >= 0 and self.library.recipes.id(taken) != self.renaming:
+                self.tell(f"A recipe is already named “{name}”.")
                 return
-            self.library.rename_preset(self.renaming, name)
+            self.library.rename_recipe(self.renaming, name)
             self.show(self.renaming)
 
-    ## "Preset", else "Preset 2", "Preset 3"… : a name no preset has.
+    ## "Recipe", else "Recipe 2", "Recipe 3"… : a name no recipe has.
     func free_name(self) -> str:
-        let presets = self.library.presets
-        var name = "Preset"
+        let recipes = self.library.recipes
+        var name = "Recipe"
         var number = 2
-        while presets.position_of_name(name) >= 0:
-            name = f"Preset {number}"
+        while recipes.position_of_name(name) >= 0:
+            name = f"Recipe {number}"
             number += 1
         return name
 
@@ -176,15 +187,15 @@ pub class PresetsPane:
         let at = self.chosen()
         if at < 0:
             return
-        self.deleting = self.library.presets.id(at)
-        self.confirm.open(f"Delete the preset “{self.library.presets.name(at)}”? Photos keep the settings it gave them.", "Delete", "")
+        self.deleting = self.library.recipes.id(at)
+        self.confirm.open(f"Delete the recipe “{self.library.recipes.name(at)}”? Photos keep the settings it gave them.", "Delete", "")
 
     func chosen_delete(self, role: int) -> unit!:
         let id = self.deleting
         self.deleting = -1
         if role != 0 or id < 0:
             return
-        self.library.delete_preset(id)
+        self.library.delete_recipe(id)
         self.show()
 
     func tell(self, text: str) -> unit!:

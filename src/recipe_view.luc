@@ -1,0 +1,528 @@
+## The Recipe pane's graph: the photo's film process as nodes, Houdini-style,
+## drawn as luced-3d draws its nodes (this is luced-photo's own, shaped for
+## film). Each stage of the recipe (luce-develop's recipe.lucb) is luced-3d's
+## node: its icon in the box, its name and detail beside it, its input on top
+## and its output below, so a recipe reads down like the process it is. A box
+## takes a tint of its family's color (the source, the camera, the chemistry,
+## the presentation); wires take the color of what flows on them (light, a
+## latent exposure, processed film, a scanned image, display light), and only
+## matching media connect. On a box, the left strip bypasses the stage (B) and
+## the right one makes it the displayed stage (D), which the viewer shows.
+##
+## Drag a box to move it, drag from a port to another to wire them, Alt-click an
+## input to cut its wire, or hold Y and drag across wires to cut them. Delete
+## removes the picked stage; Tab or a right click opens the menu to add stages
+## and start from a mode. Middle drag, Space drag or a two-finger scroll pans; a
+## wheel, pinch or Ctrl-scroll zooms; Home frames the recipe.
+##
+## The view edits the Look the develop controls hold, then calls `on_change`;
+## `on_pick` says which stage is picked (-1 none), for Properties.
+from luce_ui import ui
+from luce_ui.ui import Widget, Layout, Constraints, Size, Event, Painter, Point, Font
+from luce_gpu.gpu import RenderTarget, Rect, Color
+from luce_window.input import EventKind, Key, ScrollUnit
+from luce_std import math
+from luce_develop.settings import Look
+from luce_develop import recipe
+from luce_develop import film
+import theme
+
+## A node's box, as luced-3d's.
+pub let node_width: float = 96.0
+pub let node_height: float = 40.0
+## Where the bypass strip ends and the display flag begins, across a box.
+let bypass_edge: float = 13.5
+let display_edge: float = 81.0
+## Room for a node's caption, right of its box, when framing.
+let caption: float = 170.0
+
+## The color of medium `medium` (recipe.medium_name): warm light, the red of a
+## safelight for a latent exposure, film's orange, a scan's blue, white display.
+pub func medium_color(medium: int) -> Color:
+    match medium:
+        1:
+            return theme.srgb(232.0, 198.0, 106.0)
+        2:
+            return theme.srgb(200.0, 87.0, 74.0)
+        3:
+            return theme.accent()
+        4:
+            return theme.srgb(91.0, 143.0, 214.0)
+        5:
+            return theme.grey(217.0)
+        _:
+            return theme.grey(120.0)
+
+## The icon of stage `stage`, from the shared LuciaOS set.
+func icon_of(stage: int) -> str:
+    return ["import", "eyedropper-tool", "light-sun", "camera", "filter", "texture", "fill-tool", "frame-selection",
+            "color-correction", "print", "play", "light-point", "visible", "crop-tool"][stage]
+
+## The color of family `category` (recipe.category_name): slate for the
+## source, brass for the camera, a darkroom's red-brown for the chemistry, a
+## screen's blue for the presentation.
+pub func category_color(category: int) -> Color:
+    match category:
+        0:
+            return theme.srgb(112.0, 128.0, 140.0)
+        1:
+            return theme.srgb(201.0, 162.0, 39.0)
+        2:
+            return theme.srgb(181.0, 84.0, 60.0)
+        _:
+            return theme.srgb(79.0, 127.0, 184.0)
+
+## `a` mixed with `amount` of `b`.
+func mix(a: Color, b: Color, amount: float) -> Color:
+    return Color(a.red + (b.red - a.red) * amount, a.green + (b.green - a.green) * amount, a.blue + (b.blue - a.blue) * amount)
+
+pub class RecipeView: Widget:
+    let box: Layout
+    let look: Look
+    let base_font: Font
+    var font: Font
+    var zoom: float = 1.0
+    var pan_x: float = 40.0
+    var pan_y: float = 20.0
+    pub var pointer_x: float = 0.0
+    pub var pointer_y: float = 0.0
+    ## The picked stage, or -1.
+    pub var picked: int = -1
+    var hovered: int = -1
+    ## What a drag does: "", "pan", "move", "wire", "cut".
+    var mode: str = ""
+    var space: bool = false
+    var cutting: bool = false
+    var start_x: float = 0.0
+    var start_y: float = 0.0
+    var node_x: float = 0.0
+    var node_y: float = 0.0
+    ## A wire being drawn: from the output of `wire_stage`, or into its input.
+    var wire_stage: int = -1
+    var from_output: bool = true
+    var moved: bool = false
+    var frame_pending: bool = true
+    pub var on_change: func() -> unit!? = none
+    pub var on_pick: func(int) -> unit!? = none
+    ## Tab: open the menu at the pointer.
+    pub var on_menu: func() -> unit!? = none
+
+    pub func init(self, look: Look, font: Font) -> unit!:
+        self.look = look
+        self.base_font = font
+        self.font = font
+        self.box = Layout()
+        self.box.set_flex()
+        self.box.set_interactive(true)
+        self.box.set_focusable(true)
+        self.box.set_accepts_tab(true)
+
+    pub func layout(self) -> Layout:
+        return self.box
+    pub func measure(self, available: Constraints) -> Size!:
+        return Size(320.0, 180.0)
+
+    ## Draw again: the look changed under the view (another photo, undo).
+    pub func refresh(self):
+        if self.picked >= 0 and not self.look.has_stage(self.picked):
+            self.picked = -1
+        self.box.invalidate()
+
+    ## Frame the recipe at the next draw.
+    pub func frame_soon(self):
+        self.frame_pending = true
+        self.box.invalidate()
+
+    func to_graph(self, x: float, y: float) -> Point:
+        return Point((x - self.pan_x) / self.zoom, (y - self.pan_y) / self.zoom)
+    func to_screen(self, x: float, y: float) -> Point:
+        return Point(x * self.zoom + self.pan_x, y * self.zoom + self.pan_y)
+
+    ## The stages in the recipe.
+    func stages(self) -> list[int]:
+        var out: list[int] = []
+        for stage in 0..<recipe.stage_total():
+            if self.look.has_stage(stage):
+                out.append(stage)
+        return out
+
+    ## Stage `stage`'s input (top) or output (bottom) port, on screen.
+    func port(self, stage: int, output: bool) -> Point:
+        return self.to_screen(self.look.stage_x(stage) + node_width * 0.5, self.look.stage_y(stage) + (node_height if output else 0.0))
+
+    ## The stage whose box holds (x, y) on screen, or -1.
+    func stage_at(self, x: float, y: float) -> int:
+        let at = self.to_graph(x, y)
+        for stage in self.stages().reversed():
+            let left = self.look.stage_x(stage)
+            let top = self.look.stage_y(stage)
+            if at.x >= left and at.x <= left + node_width and at.y >= top and at.y <= top + node_height:
+                return stage
+        return -1
+
+    ## The port near (x, y): [stage, 1 for an output, 0 for an input]; [] none.
+    func port_at(self, x: float, y: float) -> list[int]:
+        for stage in self.stages().reversed():
+            if recipe.stage_output(stage) > 0:
+                let out = self.port(stage, true)
+                if math.abs(out.x - x) <= 10.0 and math.abs(out.y - y) <= 10.0:
+                    return [stage, 1]
+            if recipe.stage_input(stage) > 0:
+                let input = self.port(stage, false)
+                if math.abs(input.x - x) <= 10.0 and math.abs(input.y - y) <= 10.0:
+                    return [stage, 0]
+        return []
+
+    pub func zoom_about(self, factor: float, x: float, y: float):
+        let before = self.to_graph(x, y)
+        self.zoom = math.max(0.35, math.min(2.5, self.zoom * factor))
+        self.pan_x = x - before.x * self.zoom
+        self.pan_y = y - before.y * self.zoom
+        self.box.invalidate()
+
+    pub func frame_all(self):
+        let stages = self.stages()
+        if stages.length == 0:
+            return
+        var left = self.look.stage_x(stages[0])
+        var top = self.look.stage_y(stages[0])
+        var right = left + node_width + caption
+        var bottom = top + node_height
+        for stage in stages:
+            left = math.min(left, self.look.stage_x(stage))
+            top = math.min(top, self.look.stage_y(stage))
+            right = math.max(right, self.look.stage_x(stage) + node_width + caption)
+            bottom = math.max(bottom, self.look.stage_y(stage) + node_height)
+        let bounds = self.box.bounds()
+        self.zoom = math.max(0.35, math.min(1.2, math.min((bounds.width - 60.0) / (right - left), (bounds.height - 40.0) / (bottom - top))))
+        self.pan_x = (bounds.width - (right - left) * self.zoom) * 0.5 - left * self.zoom
+        self.pan_y = (bounds.height - (bottom - top) * self.zoom) * 0.5 - top * self.zoom
+        self.box.invalidate()
+
+    # mark: drawing =============================================================================
+
+    pub func draw(self, target: RenderTarget) -> unit!:
+        if self.frame_pending and self.box.bounds().width > 0.0:
+            self.frame_pending = false
+            self.frame_all()
+        let size = target.size()
+        let p = Painter(target)
+        p.rectangle(Rect(0.0, 0.0, size.width, size.height), theme.backdrop())
+        let step = 32.0 * self.zoom
+        var x = self.pan_x - math.floor(self.pan_x / step) * step
+        while x < size.width:
+            var y = self.pan_y - math.floor(self.pan_y / step) * step
+            while y < size.height:
+                p.rectangle(Rect(x, y, 1.0, 1.0), theme.border())
+                y += step
+            x += step
+        let wanted = float(int(math.max(8.0, self.base_font.size() * self.zoom)))
+        if wanted != self.font.size():
+            self.font = self.base_font if wanted == self.base_font.size() else Font(wanted)
+        let stages = self.stages()
+        for stage in stages:
+            let source = self.look.stage_source(stage)
+            if source >= 0:
+                self.wire(p, self.port(source, true), self.port(stage, false), medium_color(recipe.stage_output(source)), self.look.stage_active(stage))
+        for stage in stages:
+            self.draw_stage(p, stage)
+        if self.mode == "wire":
+            let pointer = Point(self.pointer_x, self.pointer_y)
+            let end = self.port(self.wire_stage, self.from_output)
+            let medium = recipe.stage_output(self.wire_stage) if self.from_output else recipe.stage_input(self.wire_stage)
+            self.wire(p, end if self.from_output else pointer, pointer if self.from_output else end, medium_color(medium), true)
+        if self.mode == "cut":
+            p.line(Point(self.start_x, self.start_y), Point(self.pointer_x, self.pointer_y), 1.5, theme.accent())
+        let hint = self.hint()
+        if hint != "":
+            p.text(hint, 10.0, size.height - 22.0, theme.text_muted())
+        if stages.length == 0:
+            p.text("No recipe: press Tab to add stages or start from a mode.", 12.0, 12.0, theme.text_muted())
+        elif not self.look.recipe_works():
+            p.text("The displayed stage does not reach a Photo: the photo shows as shot.", 12.0, 12.0, theme.text_muted())
+        p.close()
+
+    ## A stage drawn as luced-3d draws a node: a box with the stage's icon, its
+    ## name and detail to the right, the bypass strip on the left and the
+    ## display flag on the right, its input on top and its output below. The
+    ## body takes a tint of its family's color.
+    func draw_stage(self, p: Painter, stage: int) -> unit!:
+        let at = self.to_screen(self.look.stage_x(stage), self.look.stage_y(stage))
+        let w = node_width * self.zoom
+        let h = node_height * self.zoom
+        let bypassed = self.look.stage_bypassed(stage)
+        let active = self.look.stage_active(stage)
+        let shown = self.look.display_stage() == stage
+        let radius = 3.0 * self.zoom
+        let ring = theme.accent() if stage == self.picked else (theme.text_muted() if stage == self.hovered else theme.grey(78.0))
+        p.rounded_rectangle(Rect(at.x - 1.5, at.y - 1.5, w + 3.0, h + 3.0), ring, radius + 1.5)
+        let family = category_color(recipe.stage_category(stage))
+        p.rounded_rectangle(Rect(at.x, at.y, w, h), mix(theme.grey(64.0), family, 0.3) if active else theme.tab_strip(), radius)
+        let ink = theme.text() if active else theme.text_muted()
+        ui.draw_icon(p.target(), icon_of(stage), Rect(at.x + 36.0 * self.zoom, at.y + 8.0 * self.zoom, 24.0 * self.zoom, 24.0 * self.zoom), ink)
+        p.text(recipe.stage_name(stage), at.x + 109.0 * self.zoom, at.y + (1.0 if self.zoom >= 0.65 else 10.0) * self.zoom, ink, self.font)
+        if self.zoom >= 0.65:
+            p.text(self.detail(stage), at.x + 109.0 * self.zoom, at.y + 22.0 * self.zoom, theme.text_muted(), self.font)
+        # Bypass on the left, the display flag on the right.
+        p.rectangle(Rect(at.x + 3.0 * self.zoom, at.y + 5.0 * self.zoom, 9.0 * self.zoom, 30.0 * self.zoom), theme.accent() if bypassed else theme.border())
+        p.rectangle(Rect(at.x + 84.0 * self.zoom, at.y + 5.0 * self.zoom, 9.0 * self.zoom, 30.0 * self.zoom), theme.accent() if shown else theme.border())
+        if bypassed:
+            p.line(Point(at.x + 16.0 * self.zoom, at.y + 31.0 * self.zoom), Point(at.x + 78.0 * self.zoom, at.y + 9.0 * self.zoom), 1.0, theme.text_muted())
+        if recipe.stage_input(stage) > 0:
+            self.draw_port(p, self.port(stage, false), medium_color(recipe.stage_input(stage)), self.look.stage_source(stage) >= 0)
+        if recipe.stage_output(stage) > 0:
+            self.draw_port(p, self.port(stage, true), medium_color(recipe.stage_output(stage)), true)
+
+    ## The line under a stage's name: its stock, its view, or what it gives.
+    func detail(self, stage: int) -> str!:
+        if self.look.stage_bypassed(stage):
+            return "bypassed"
+        if recipe.stage_name(stage) == "Film":
+            let stock = int(self.look.get("film_stock")) - 1
+            if stock >= 0 and stock < film.stock_count():
+                return film.stock_name(stock)
+        if recipe.stage_name(stage) == "View":
+            return ["ACES 2.0", "Standard", "Linear", "Print"][int(math.clamp(self.look.get("view"), 0.0, 3.0))]
+        return recipe.medium_name(recipe.stage_output(stage))
+
+    func draw_port(self, p: Painter, at: Point, color: Color, connected: bool) -> unit!:
+        let width = math.max(8.0, 14.0 * self.zoom)
+        let height = math.max(3.0, 4.0 * self.zoom)
+        p.rounded_rectangle(Rect(at.x - width * 0.5, at.y - height * 0.5, width, height), color if connected else theme.grey(90.0), 1.5)
+
+    func wire(self, p: Painter, a: Point, b: Point, color: Color, active: bool) -> unit!:
+        let points = curve(a, b)
+        let width = math.max(1.0, 1.6 * self.zoom)
+        let ink = color if active else theme.grey(95.0)
+        for at in 1..<points.length:
+            p.line(points[at - 1], points[at], width, ink)
+
+    ## What the pointer is over, in the bottom-left corner.
+    func hint(self) -> str!:
+        if self.cutting and self.mode == "":
+            return "Drag across wires to cut them"
+        if self.hovered < 0 or self.mode != "":
+            return ""
+        let at = self.to_graph(self.pointer_x, self.pointer_y)
+        let left = self.look.stage_x(self.hovered)
+        if at.x < left + bypass_edge:
+            return "Bypass (B)"
+        if at.x >= left + display_edge:
+            return "Display (D)"
+        return recipe.stage_description(self.hovered)
+
+    # mark: editing =============================================================================
+
+    func changed(self) -> unit!:
+        self.box.invalidate()
+        if let tell = self.on_change:
+            tell()
+
+    pub func pick(self, stage: int) -> unit!:
+        if stage == self.picked:
+            return
+        self.picked = stage
+        self.box.invalidate()
+        if let tell = self.on_pick:
+            tell(stage)
+
+    ## Add stage `stage` at the pointer, wired after the picked stage when the
+    ## media match, and pick it.
+    pub func add_at_pointer(self, stage: int) -> unit!:
+        let at = self.to_graph(self.pointer_x, self.pointer_y)
+        if not self.look.add_stage(stage, at.x - node_width * 0.5, at.y - node_height * 0.5):
+            return
+        if self.picked >= 0:
+            _ = self.look.connect(self.picked, stage)
+        self.pick(stage)
+        self.changed()
+
+    pub func remove_picked(self) -> unit!:
+        if self.picked < 0:
+            return
+        self.look.remove_stage(self.picked)
+        self.pick(-1)
+        self.changed()
+
+    pub func toggle_bypass(self, stage: int) -> unit!:
+        if stage < 0:
+            return
+        self.look.set_bypassed(stage, not self.look.stage_bypassed(stage))
+        self.changed()
+
+    pub func display(self, stage: int) -> unit!:
+        if stage < 0 or self.look.display_stage() == stage:
+            return
+        self.look.set_display(stage)
+        self.changed()
+
+    ## Start from mode `at`: its recipe and stock, framed.
+    pub func use_mode(self, at: int) -> unit!:
+        self.look.use_mode(at)
+        self.pick(-1)
+        self.frame_soon()
+        self.changed()
+
+    func finish_wire(self, x: float, y: float) -> unit!:
+        let hit = self.port_at(x, y)
+        let target = self.stage_at(x, y) if hit.length == 0 else hit[0]
+        if target < 0 or target == self.wire_stage:
+            return
+        let source = self.wire_stage if self.from_output else target
+        let into = target if self.from_output else self.wire_stage
+        if self.look.connect(source, into):
+            self.changed()
+
+    ## Cut every wire the line from the drag's start to (x, y) crosses.
+    func finish_cut(self, x: float, y: float) -> unit!:
+        var cut = false
+        for stage in self.stages():
+            let source = self.look.stage_source(stage)
+            if source >= 0 and crosses(curve(self.port(source, true), self.port(stage, false)), Point(self.start_x, self.start_y), Point(x, y)):
+                self.look.disconnect(stage)
+                cut = true
+        if cut:
+            self.changed()
+
+    # mark: events ==============================================================================
+
+    pub func event(self, event: Event) -> unit!:
+        if event.kind == EventKind.pointer_moved or event.kind == EventKind.pointer_down:
+            self.pointer_x = event.x
+            self.pointer_y = event.y
+        if event.cancelled or event.kind == EventKind.focus_lost:
+            self.mode = ""
+            self.space = false
+            self.cutting = false
+        elif event.kind == EventKind.key_down:
+            if event.key == Key.space:
+                self.space = true
+            elif event.key == Key.y and not event.repeated:
+                self.cutting = true
+            elif event.key == Key.tab:
+                if let menu = self.on_menu:
+                    menu()
+            elif event.key == Key.delete or event.key == Key.backspace:
+                self.remove_picked()
+            elif event.key == Key.b:
+                self.toggle_bypass(self.picked)
+            elif event.key == Key.d:
+                self.display(self.picked)
+            elif event.key == Key.home:
+                self.frame_all()
+            elif event.key == Key.escape:
+                self.mode = ""
+        elif event.kind == EventKind.key_up and event.key == Key.space:
+            self.space = false
+        elif event.kind == EventKind.key_up and event.key == Key.y:
+            self.cutting = false
+        elif event.kind == EventKind.magnify:
+            self.zoom_about(math.max(0.1, 1.0 + event.scroll_y), event.x, event.y)
+        elif event.kind == EventKind.scroll:
+            if event.scroll_unit == ScrollUnit.points and not event.control and not event.meta:
+                self.pan_x += event.scroll_x
+                self.pan_y += event.scroll_y
+            else:
+                self.zoom_about(math.exp(event.scroll_y * (0.01 if event.scroll_unit == ScrollUnit.points else 0.12)), event.x, event.y)
+        elif event.kind == EventKind.pointer_down and event.inside:
+            self.start_x = event.x
+            self.start_y = event.y
+            if event.button == 1:
+                # The menu opens around it; a right click picks the stage under it.
+                self.pick(self.stage_at(event.x, event.y))
+            elif event.button == 2 or self.space:
+                self.mode = "pan"
+            elif self.cutting:
+                self.mode = "cut"
+            else:
+                self.press(event)
+        elif event.kind == EventKind.pointer_moved:
+            self.hovered = self.stage_at(event.x, event.y) if event.inside else -1
+            if self.mode == "pan":
+                self.pan_x += event.x - self.start_x
+                self.pan_y += event.y - self.start_y
+                self.start_x = event.x
+                self.start_y = event.y
+            elif self.mode == "move" and self.picked >= 0:
+                self.look.move_stage(self.picked, self.node_x + (event.x - self.start_x) / self.zoom, self.node_y + (event.y - self.start_y) / self.zoom)
+                self.moved = true
+        elif event.kind == EventKind.pointer_up:
+            if self.mode == "move" and self.moved:
+                self.changed()
+            elif self.mode == "wire":
+                self.finish_wire(event.x, event.y)
+            elif self.mode == "cut":
+                self.finish_cut(event.x, event.y)
+            self.mode = ""
+        elif event.kind == EventKind.pointer_left:
+            self.hovered = -1
+        self.box.invalidate()
+
+    ## A left press: on a port, a wire (Alt on an input cuts its wire); on a
+    ## box's strips, bypass or display; on a box, pick and move; on nothing,
+    ## pick nothing.
+    func press(self, event: Event) -> unit!:
+        let hit = self.port_at(event.x, event.y)
+        if hit.length > 0:
+            if event.alt and hit[1] == 0:
+                if self.look.stage_source(hit[0]) >= 0:
+                    self.look.disconnect(hit[0])
+                    self.changed()
+                return
+            self.mode = "wire"
+            self.wire_stage = hit[0]
+            self.from_output = hit[1] == 1
+            return
+        let stage = self.stage_at(event.x, event.y)
+        self.pick(stage)
+        if stage < 0:
+            return
+        let at = self.to_graph(event.x, event.y)
+        let left = self.look.stage_x(stage)
+        if at.x < left + bypass_edge:
+            self.toggle_bypass(stage)
+        elif at.x >= left + display_edge:
+            self.display(stage)
+        else:
+            self.mode = "move"
+            self.moved = false
+            self.node_x = left
+            self.node_y = self.look.stage_y(stage)
+
+# mark: wires ===================================================================================
+
+## A wire's curve from output `a` (below a box) down to input `b` (above
+## another), as 21 points, as luced-3d draws its wires.
+func curve(a: Point, b: Point) -> list[Point]:
+    let reach = math.max(35.0, math.abs(b.y - a.y) * 0.5)
+    let points = [a]
+    for step in 1..<21:
+        let t = float(step) / 20.0
+        let u = 1.0 - t
+        points.append(Point(u * u * u * a.x + 3.0 * u * u * t * a.x + 3.0 * u * t * t * b.x + t * t * t * b.x,
+            u * u * u * a.y + 3.0 * u * u * t * (a.y + reach) + 3.0 * u * t * t * (b.y - reach) + t * t * t * b.y))
+    return points
+
+## Whether the line from `a` to `b` crosses the curve.
+func crosses(points: list[Point], a: Point, b: Point) -> bool:
+    for at in 1..<points.length:
+        let c = points[at - 1]
+        let d = points[at]
+        let d1 = side(c, d, a)
+        let d2 = side(c, d, b)
+        let d3 = side(a, b, c)
+        let d4 = side(a, b, d)
+        # Half-open, so a line through a point the curve is sampled at
+        # crosses one of the two pieces there.
+        if (d1 > 0.0) != (d2 > 0.0) and (d3 > 0.0) != (d4 > 0.0):
+            return true
+    return false
+
+func side(a: Point, b: Point, p: Point) -> float:
+    return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+
+test "a cut line across a wire crosses it, one beside it does not":
+    let wire = curve(Point(0.0, 0.0), Point(0.0, 100.0))
+    assert(crosses(wire, Point(-20.0, 47.0), Point(20.0, 47.0)))
+    assert(crosses(wire, Point(-20.0, 50.0), Point(20.0, 50.0)))
+    assert(not crosses(wire, Point(10.0, 50.0), Point(40.0, 50.0)))

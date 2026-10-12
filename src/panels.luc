@@ -1,8 +1,10 @@
-## The window: a toolbar over docked panes — Library with Presets below it, Viewer
-## and Properties — with a status line below. The panels carry what happens between the panes:
+## The window: a toolbar over docked panes — Library with Recipes below it, Viewer
+## with the photo's Recipe graph beside it, and Properties — with a status line
+## below. The panels carry what happens between the panes:
 ## picking photos in the grid shows the lead one in the viewer and its facts in
 ## Properties; ratings, flags and labels act on the whole selection; an import's
-## progress shows in the status line while the grid fills in.
+## progress shows in the status line while the grid fills in; picking a stage
+## in the Recipe graph shows its controls in Properties.
 from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
 from interop import Connection
 from actions import Actions, label_number
@@ -10,7 +12,8 @@ from photo_library import PhotoLibrary
 from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
-from presets_pane import PresetsPane
+from recipes_pane import RecipesPane
+from recipe_pane import RecipePane
 from rerender import Rerenderer
 from develop_session import DevelopSession
 from exporter import Exporter
@@ -33,7 +36,8 @@ pub class Panels:
     pub let library_pane: LibraryPane
     pub let viewer: Viewer
     pub let properties: PropertiesPane
-    pub let presets: PresetsPane
+    pub let recipes: RecipesPane
+    pub let recipe: RecipePane
     pub let dock: DStack
     let status: Text
     let palette: CommandPalette
@@ -66,11 +70,21 @@ pub class Panels:
         self.palette = CommandPalette(self.actions.all, font = font)
         self.session = DevelopSession(self.library, self.properties.develop, self.viewer, self.library_pane, self.rerenderer)
         self.session.on_status = self.tell
-        self.presets = PresetsPane(self.library, font)
-        self.presets.current = self.session.preset_text
-        self.presets.on_status = self.tell
-        self.presets.on_apply = func (name: str, text: str) -> unit!:
-            self.session.apply_preset(self.library_pane.selection(), name, text)
+        self.recipes = RecipesPane(self.library, font)
+        self.recipes.current = self.session.recipe_text
+        self.recipes.on_status = self.tell
+        self.recipes.on_apply = func (name: str, text: str) -> unit!:
+            self.session.apply_recipe(self.library_pane.selection(), name, text)
+        self.recipe = RecipePane(self.properties.develop.look, font)
+        let graph = self.recipe.view
+        graph.on_pick = func (stage: int) -> unit!:
+            self.properties.develop.show_stage(stage)
+        graph.on_change = func () -> unit!:
+            # A mode changes the stock; bypassing changes what shows.
+            self.properties.develop.show_values()
+            self.session.changed()
+        self.properties.develop.on_shown = func () -> unit!:
+            graph.refresh()
         self.library_pane.on_pick = self.show_selection
         self.properties.develop.on_change = self.session.changed
         let controls = self.properties.develop
@@ -109,7 +123,10 @@ pub class Panels:
         self.dock.set_fraction(self.library_pane.panel, 0.34)
         self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
         self.dock.set_fraction(self.viewer.panel, 0.7)
-        self.dock.add(self.presets.panel, self.library_pane.panel, DockPosition.bottom)
+        # The recipe reads down, as luced-3d's network: a column beside the viewer.
+        self.dock.add(self.recipe.panel, self.viewer.panel, DockPosition.right)
+        self.dock.set_fraction(self.viewer.panel, 0.7)
+        self.dock.add(self.recipes.panel, self.library_pane.panel, DockPosition.bottom)
         self.dock.set_fraction(self.library_pane.panel, 0.82)
         self.dock.layout().set_flex()
         let footer = HStack([self.status], padding = 6.0)
@@ -214,7 +231,7 @@ pub class Panels:
         self.session.forget()
         self.unshown = -1
         self.library_pane.show_library()
-        self.presets.show()
+        self.recipes.show()
         self.show_selection(-1)
         self.show_library_title()
         self.greet()
@@ -358,7 +375,10 @@ pub class Panels:
             return
         let index = self.library.index
         let id = index.id(lead)
+        let other = id != self.session.developing
         self.session.open(id, index.settings(lead))
+        if other:
+            self.recipe.view.frame_soon()
         self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), index.width(lead), index.height(lead))
 
     ## An Aspect menu value as width over height: -1 is the photo's own, 0 free.
@@ -431,5 +451,6 @@ pub class Panels:
         self.library_pane.close()
         self.viewer.close()
         self.properties.close()
-        self.presets.close()
+        self.recipes.close()
+        self.recipe.close()
         self.library.close()

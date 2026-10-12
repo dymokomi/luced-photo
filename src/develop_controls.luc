@@ -1,6 +1,7 @@
 ## The develop's controls in the Properties pane. Each section of luce-develop's
-## parameter table (White Balance, Exposure & Tone, Film, Levels, Curves, Color,
-## Color Mixer, Color Grading, Black & White, Lens, Geometry, Effects, View) is a
+## parameter table (White Balance, Exposure, Lens, Filter, Film, Develop, Scan,
+## Tone, Levels, Curves, Color, Color Mixer, Color Grading, Black & White, View,
+## Vignette, Geometry, Crop) is a
 ## luce-ui ParameterPanel with one folder heading, the same rows luced-2d and
 ## luced-3d use: right-aligned labels in one fixed column, a typeable field and
 ## an equal-length slider per number, gradient tracks where color or light helps
@@ -8,6 +9,10 @@
 ## widget under their panel (the curve editor, the tone wheels), shown while the
 ## folder is open. The Color Mixer edits one hue band at a time: a row of chips
 ## picks the band, its hue, saturation and luminance show on three sliders.
+##
+## Each section belongs to a stage of the photo's recipe (luce-develop's
+## recipe.lucb), and only the stage picked in the Recipe pane shows, its
+## sections under its name: every control lives in a stage of the process.
 ##
 ## The controls edit a Look (luce-develop's settings) and call `on_change` after
 ## every edit; `show` loads a photo's settings without calling it.
@@ -17,16 +22,18 @@ from interop import Connection
 from luce_develop.settings import Look, look
 from luce_develop import settings
 from luce_develop import film
+from luce_develop import recipe
 
 ## The label column every section shares, so all the sliders line up.
 let label_width: float = 104.0
 
 ## The sections in the order they show, and those that start open.
 func section_order() -> list[str]:
-    return ["White Balance", "Exposure & Tone", "Film", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Geometry", "Crop", "Effects", "View"]
+    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "View", "Vignette", "Geometry", "Crop"]
 
+## A stage with one section shows it open; the Grade's start with Tone and Color.
 func opened() -> list[str]:
-    return ["White Balance", "Exposure & Tone", "Color"]
+    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Color", "View", "Vignette", "Geometry", "Crop"]
 
 ## The Color Mixer's bands, as the parameter names spell them, and their chips' colors.
 func bands() -> list[str]:
@@ -70,6 +77,9 @@ class Section:
     pub let panel: ParameterPanel
     pub let names: list[str]
     pub let extra: VStack?
+    ## The recipe stage the section belongs to, and whether it shows.
+    pub let stage: int
+    pub var shown: bool = true
 
     pub func init(self, title: str, specs: list[ParameterSpec], extra: VStack?, font: Font) -> unit!:
         self.title = title
@@ -81,6 +91,7 @@ class Section:
             names.append(spec.name)
         self.names = names
         self.extra = extra
+        self.stage = recipe.owner_of(title)
 
     ## Row `name`'s index, or -1.
     pub func row(self, name: str) -> int:
@@ -116,6 +127,11 @@ pub class DevelopControls:
     ## (width over height; 0 free, -1 the photo's own).
     pub var on_crop_tool: func(bool, float) -> unit!? = none
     pub var on_crop_aspect: func(float) -> unit!? = none
+    ## Called after the controls show other settings (another photo, undo).
+    pub var on_shown: func() -> unit!? = none
+    ## The picked stage (-1 none), named over its sections.
+    var stage: int = -1
+    let stage_title: Text
 
     pub func init(self, font: Font) -> unit!:
         self.look = look("")
@@ -124,7 +140,8 @@ pub class DevelopControls:
         self.curves = CurveEditor()
         self.curves.layout().set_limits(Size(200.0, 200.0), Size(320.0, 320.0))
         self.wheels = []
-        var widgets: list[Widget] = []
+        self.stage_title = Text("", font = font)
+        var widgets: list[Widget] = [self.stage_title]
         for title in section_order():
             let section = Section(title, self.specs_for(title), self.extra_for(title, font), font)
             self.watch(section)
@@ -173,22 +190,23 @@ pub class DevelopControls:
             specs.append(ParameterSpec(name = "aspect", label = "Aspect", kind = ParameterKind.menu, resettable = false,
                                        items = "Free=0|Original=-1|1:1=1|4:5=0.8|5:4=1.25|3:2=1.5|2:3=0.6667|16:9=1.7778"))
         if title == "Film":
-            var stocks = ["None=0"]
+            var stocks: list[str] = []
             for at in 0..<film.stock_count():
                 stocks.append(f"{film.stock_name(at)}={at + 1}")
-            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|")))
+            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
-            # Matched balances the light to the stock as White Balance does; with
-            # None or 85, White Balance is the light on set and the film sees it.
-            specs.insert(3, ParameterSpec(name = "film_filter", label = "Filter", kind = ParameterKind.menu,
+        if title == "Filter":
+            # Matched balances the light to the stock as a white balance does;
+            # with None or 85, White Balance is the light on set and the film sees it.
+            specs.insert(1, ParameterSpec(name = "film_filter", label = "Balance", kind = ParameterKind.menu,
                                           items = "Matched=0|None=1|85 (daylight)=2",
                                           doc = "Matched: balanced to the stock. None or 85: White Balance is the light on set, as the film saw it"))
-            specs.insert(4, ParameterSpec(name = "film_color_filter", label = "Color Filter", kind = ParameterKind.menu,
+            specs.insert(2, ParameterSpec(name = "film_color_filter", label = "Color Filter", kind = ParameterKind.menu,
                                           items = "None=0|Yellow (8)=1|Orange (21)=2|Red (25)=3|Green (11)=4|Blue (47)=5",
                                           doc = "A color filter on the lens, as for black-and-white film; exposure opens up by its factor"))
         if title == "View":
-            specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2|Kodak 2383 Print=3"))
+            specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
         return specs
 
@@ -399,6 +417,35 @@ pub class DevelopControls:
             self.wheels[at].set_hsb(self.look.get(f"grade_{range}_hue"), self.look.get(f"grade_{range}_saturation") / 100.0, 1.0)
         self.showing = false
         self.show_curve()
+        self.show_stage(self.stage)
+        if let tell = self.on_shown:
+            tell()
+
+    ## Show stage `stage`'s sections under its name; with -1, or a stage the
+    ## recipe lacks, none.
+    pub func show_stage(self, stage: int) -> unit!:
+        self.stage = stage
+        let picked = stage >= 0 and self.look.has_stage(stage)
+        if not picked:
+            self.stage_title.set_text("Pick a stage in the Recipe to change it.")
+        else:
+            var state = ""
+            if self.look.stage_bypassed(stage):
+                state = "  ·  bypassed"
+            elif not self.look.stage_active(stage):
+                state = "  ·  not on the displayed path"
+            self.stage_title.set_text(recipe.stage_name(stage).upper() + state)
+        for section in self.sections:
+            section.shown = picked and section.stage == stage
+            section.panel.layout().set_visible(section.shown)
+        self.tick()
+
+    ## Whether section `title` shows (its stage is picked, or in the recipe).
+    pub func section_shown(self, title: str) -> bool:
+        for section in self.sections:
+            if section.title == title:
+                return section.shown
+        return false
 
     ## The Color Mixer's three rows for the chosen band: its values and tracks.
     func show_mixer(self, section: Section) -> unit!:
@@ -443,7 +490,7 @@ pub class DevelopControls:
     pub func tick(self):
         for section in self.sections:
             if let extra = section.extra:
-                extra.layout().set_visible(section.is_open())
+                extra.layout().set_visible(section.shown and section.is_open())
 
     pub func close(self):
         for connection in self.connections:

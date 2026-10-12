@@ -129,7 +129,7 @@ Catalog identities (luce-prism):
 | --- | --- | --- |
 | `photos` | `/p<id>` | path, name, format, bytes, sha256, imported, captured, offset, width, height, orientation, make, model, lens, focal, aperture, shutter, iso, exposure_bias, gps, rating, flag, label, keywords, edited |
 | `edits` | `/p<id>` | one property per develop setting that differs from the default |
-| `presets` | `/r<id>` | id, name, settings (text form, without framing); `/state` next id |
+| `recipes` | `/r<id>` | id, name, settings (text form, without framing); `/state` next id |
 | `albums` | `/a<id>` | name, order, members (int list) |
 | `library` | `/state` | schema version, last import, grid size |
 
@@ -167,32 +167,24 @@ shortcuts and the command palette.
   left-dragging pan, as in luced-2d's canvas; a before/after split
   (Y), a clipping overlay (J), and a film strip along the bottom showing the
   library's current filter.
-- **Properties pane.** Collapsible sections (Accordion), each with a reset
-  button and an on/off toggle:
-  1. Histogram + capture info
-  2. White Balance: GradientSlider for temperature (blue→amber) and tint
-     (green→magenta), a picker, and presets (As Shot, Auto, Daylight…)
-  3. Exposure & Tone: exposure, contrast, highlights, shadows, whites, blacks
-  4. Curves: CurveEditor with RGB/R/G/B/Luma tabs
-  5. Levels: a Levels widget (histogram + black/grey/white input handles + output range)
-  6. Color: vibrance, saturation, and the HueMixer (8 hue chips × hue/sat/lum)
-  7. Color Grading: ToneWheels (shadows/midtones/highlights/global) + balance and blending
-  8. Selective Color: chips for reds…blacks, CMYK sliders
-  9. Black & White: on/off, the hue-weight mixer, tint
-  10. Lens: vignetting correction (amount, midpoint)
-  11. Effects: vignette (amount, midpoint, roundness, feather), grain
-  12. Detail: sharpening, noise reduction (later milestone)
-  13. View: the view transform (ACES 2.0 / Standard / Linear) and the display space
+- **Recipe pane**, below the Viewer: the photo's film process as a graph of
+  stages (docs/FILM-GRAPH.md). Every control lives in a stage.
+- **Properties pane.** The histogram and capture info, then the picked
+  stage's controls in collapsible sections, each with a reset button: White
+  Balance, Exposure, Lens, Filter, Film, Develop, Scan; the Grade's Tone,
+  Levels, Curves, Color, Color Mixer, Color Grading and Black & White; View;
+  the Easel's Vignette, Geometry and Crop.
 - **Edits** are non-destructive and stored in the catalog. Every change is an
   undo step, with drags coalesced. Copy/paste settings, sync to the selection,
   and reset are supported. None of them carries framing (perspective, crop,
   guides) from one photo to another.
-- **Presets pane**, below the Library: named settings kept in the catalog, so
-  they travel with the library. A click stacks the preset on the selected
-  photos, as Capture One's styles do: the values it holds replace the photo's,
-  and the rest stay. Each photo changed gets an undo step. The footer saves the
-  developed photo's settings as a new preset, saves them over the chosen one,
-  renames it and deletes it. A right-click on a row offers the same.
+- **Recipes pane**, below the Library: the modes (Television, Cinema, Slide,
+  Black & White), the saved recipes, kept in the catalog so they travel with
+  the library, and the film looks. A click stacks one on the selected photos,
+  as Capture One's styles do: the values it holds replace the photo's, and the
+  rest stay. Each photo changed gets an undo step. The footer saves the
+  developed photo's recipe as a new one, saves it over the chosen one, renames
+  it and deletes it. A right-click on a row offers the same.
 - **Export** runs the CPU path to JPEG, TIFF 16-bit or PNG, in sRGB, Display P3 or
   Rec.2020, with a resize option. It runs on a worker, with progress shown in the
   status line.
