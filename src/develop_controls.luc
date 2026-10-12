@@ -79,7 +79,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "print_material", "print_optical"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "print_material", "print_optical", "film_backing"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -230,6 +230,9 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35 mm Academy=0|Super 35=1|16 mm=2|Super 16=4|65 mm 5-perf=3|IMAX 15/70=5"))
+            specs.append(ParameterSpec(name = "film_backing", label = "Backing", kind = ParameterKind.menu,
+                                       items = "As made=0|Removed (as CineStill)=1",
+                                       doc = "The antihalation backing: removed, light reflected off the base comes back as red halos"))
         if title == "Print":
             specs.insert(1, ParameterSpec(name = "print_material", label = "Print Film", kind = ParameterKind.menu,
                                           items = "Kodak Vision 2383=0|Technicolor dye transfer=1"))
