@@ -16,6 +16,7 @@ from luce_ui import ui
 from interop import Connection
 from luce_develop.settings import Look, look
 from luce_develop import settings
+from luce_develop import film
 
 ## The label column every section shares, so all the sliders line up.
 let label_width: float = 104.0
@@ -172,7 +173,10 @@ pub class DevelopControls:
             specs.append(ParameterSpec(name = "aspect", label = "Aspect", kind = ParameterKind.menu, resettable = false,
                                        items = "Free=0|Original=-1|1:1=1|4:5=0.8|5:4=1.25|3:2=1.5|2:3=0.6667|16:9=1.7778"))
         if title == "Film":
-            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = "None=0|Kodak EXR 500T 5298=1"))
+            var stocks = ["None=0"]
+            for at in 0..<film.stock_count():
+                stocks.append(f"{film.stock_name(at)}={at + 1}")
+            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|")))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
         if title == "View":
