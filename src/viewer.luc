@@ -223,6 +223,9 @@ pub class Viewer: Widget:
             if let tell = self.on_developed:
                 tell(self.developer.shot_temperature(), self.developer.shot_tint(), self.developer.shot_seconds())
             self.box.invalidate()
+        # Development being watched: draw its next moment.
+        if self.developer.animating():
+            self.box.invalidate()
 
     pub func layout(self) -> Layout:
         return self.box
@@ -332,6 +335,12 @@ pub class Viewer: Widget:
         self.center_v = math.max(half_v, math.min(1.0 - half_v, self.center_v)) if half_v < 0.5 else 0.5
 
     ## Toggle between fitting the pane and 1:1, about (`x`, `y`) (the middle when negative).
+    ## Watch the film develop after each change (luce-develop's renderer runs
+    ## development over a couple of seconds, frame by frame).
+    pub func watch_development(self, on: bool) -> unit!:
+        self.developer.watch_development(on)
+        self.box.invalidate()
+
     pub func toggle_zoom(self, x: float = -1.0, y: float = -1.0) -> unit!:
         let px = x if x >= 0.0 else self.pane.width * 0.5
         let py = y if y >= 0.0 else self.pane.height * 0.5

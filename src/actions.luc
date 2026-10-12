@@ -23,8 +23,9 @@ pub class Actions:
     pub let labels: list[Command]
     pub let next: Command
     pub let previous: Command
-    ## The viewer: fit the pane, or 1:1.
+    ## The viewer: fit the pane, or 1:1; and watching the film develop.
     pub let zoom: Command
+    pub let watch_development: Command
     # The develop
     pub let undo: Command
     pub let redo: Command
@@ -64,6 +65,7 @@ pub class Actions:
         self.next = Command("Next Photo", Shortcut(Key.right, primary = true), id = "next")
         self.previous = Command("Previous Photo", Shortcut(Key.left, primary = true), id = "previous")
         self.zoom = Command("Zoom to Fit / 1:1", Shortcut(Key.z), id = "zoom")
+        self.watch_development = Command("Watch Development", Shortcut(Key.d, shift = true), id = "watch_development")
         self.undo = Command("Undo", Shortcut(Key.z, primary = true), id = "undo")
         self.redo = Command("Redo", Shortcut(Key.z, primary = true, shift = true), id = "redo")
         self.copy_settings = Command("Copy Settings", Shortcut(Key.c, primary = true, shift = true), id = "copy_settings")
@@ -75,7 +77,7 @@ pub class Actions:
         self.quit = Command("Quit", Shortcut(Key.q, primary = true), id = "quit")
         self.all = [self.new_library, self.open_library, self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
-        self.all = self.all + [self.next, self.previous, self.zoom, self.undo, self.redo, self.copy_settings, self.paste_settings,
+        self.all = self.all + [self.next, self.previous, self.zoom, self.watch_development, self.undo, self.redo, self.copy_settings, self.paste_settings,
                                self.sync_settings, self.reset_settings, self.palette, self.reset_layout, self.quit]
 
     ## Enable the actions on photos when some are selected.

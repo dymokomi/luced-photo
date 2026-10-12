@@ -79,7 +79,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "print_material", "print_optical", "film_backing"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "print_material", "print_optical", "film_backing", "develop_agitation"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -261,6 +261,9 @@ pub class DevelopControls:
             # Its items follow the stock (show_values): its standard process,
             # then the others of its family.
             specs.insert(1, ParameterSpec(name = "develop_process", label = "Process", kind = ParameterKind.menu, items = "Standard=0"))
+            specs.append(ParameterSpec(name = "develop_agitation", label = "Agitation", kind = ParameterKind.menu,
+                                       items = "As the process=0|Continuous=1|Intermittent=2|Stand=3",
+                                       doc = "How often fresh developer reaches the film: less agitation, stronger edge effects"))
         if title == "Filter":
             # Matched balances the light to the stock as a white balance does;
             # with None or 85, White Balance is the light on set and the film sees it.
