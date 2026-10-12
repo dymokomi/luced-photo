@@ -63,6 +63,10 @@ pub func essay_title(key: str) -> str:
             return "Black and white"
         "mode/cinema":
             return "Cinema: negative to print to screen"
+        "mode/color-darkroom":
+            return "Color Darkroom"
+        "mode/darkroom":
+            return "Darkroom"
         "mode/digital-intermediate":
             return "Digital Intermediate"
         "mode/slide":
@@ -143,6 +147,8 @@ pub func essay_title(key: str) -> str:
             return "The lens: light falling off toward the corners"
         "stage/lightbox":
             return "The lightbox: a slide seen directly"
+        "stage/paper":
+            return "The darkroom print"
         "stage/print":
             return "Printing: the negative onto print film"
         "stage/project":
@@ -251,6 +257,10 @@ pub func essay_text(key: str) -> str:
             return "Black-and-white negative, developed in a developer of your choice and scanned. A color filter on the lens decides which colors become light or dark grey, and the developer decides speed, grain, sharpness and how the highlights are held.\n\nThis mode puts a Filter stage before the film for that reason, and starts from Fujifilm Acros II in D-76. Try Tri-X in Rodinal for sharp, gritty grain, or a red filter for dark skies."
         "mode/cinema":
             return "The classic chain of feature films until the digital intermediate took over in the 2000s. The camera negative was developed, timed with printer lights, printed onto a high-contrast print film and projected in a dark theater.\n\nHere the negative is printed on Kodak Vision 2383 and projected under a xenon arc. The print's own curve and dyes are the tone scale: deep blacks, saturated midtones, highlights that roll off. Printer lights time the color, and the print's silver can be kept, as Technicolor's ENR and Deluxe's CCE did."
+        "mode/color-darkroom":
+            return "The color negative printed by hand on RA-4 paper, as minilabs and professional labs did from the 1980s on. The printer dials in yellow, magenta and cyan filtration in CC units to remove the negative's orange mask and any color cast, and sets the exposure by time.\n\nThis mode starts from Kodak Portra 400 printed on Kodak Endura Premier. Raise the yellow to make the print bluer, the magenta to make it greener: each filter holds back its own color's light from the paper."
+        "mode/darkroom":
+            return "The black-and-white photographer's chain: the camera, a color filter on the lens if the sky needs it, the film, its developer and time, and then the enlarger and the paper. Ansel Adams's Zone System described it as exposing for the shadows and developing for the highlights, then printing for the picture.\n\nThis mode starts from Kodak Tri-X in D-76, printed on Ilford Multigrade IV RC at grade 2 with a diffusion enlarger. Change the developer and the paper grade together to feel how a negative and a print share the work."
         "mode/digital-intermediate":
             return "The chain of most films from the early 2000s to the end of film prints: the camera negative is developed and scanned, graded digitally, recorded back to film on a laser recorder, and printed for projection. It combines what only a grade can do, such as turning one hue into another or working in windows, with the look of a projected print.\n\nThis mode develops Kodak Vision 500T, scans it, grades it, records it and prints it on Vision 2383. Recording and printing add the print's own contrast and color on top of the grade, as they did then."
         "mode/slide":
@@ -331,6 +341,8 @@ pub func essay_text(key: str) -> str:
             return "Every lens lets less light reach the corners of the frame than the center. Part of it is geometry: light reaching the edge arrives at an angle, spread over more area and seen through a narrower opening, which by itself dims it by about the fourth power of the cosine of the angle. Part of it is the lens barrel cutting off oblique light, worst at wide apertures.\n\nCinematographers lived with it and often liked it: the gentle darkening draws the eye to the middle of the frame. Modern raw developers usually correct it away. Here it happens to the light before the film sees it, so the darker corners also get the film's response there, a slightly thinner negative and a touch more grain, rather than a vignette painted on afterwards."
         "stage/lightbox":
             return "A slide is the picture itself. Reversal film comes out of processing as a positive, so there is nothing to print or invert: it is viewed by light shining through it, on a light table with a loupe, or projected.\n\nLight tables for judging color are made to a standard, D50 light, close to daylight at 5000 K, so that everyone in a print shop or an agency saw the same slide the same way. Seen like this, a slide shows its full range: the deepest dye densities of a good slide reach beyond 3.5, far more than a print on paper can hold.\n\nHere, the slide is lit by D50 light and the light coming through its dyes is what is shown."
+        "stage/paper":
+            return "For most of photography's history a picture was a print: the negative put in an enlarger, its image projected onto a sheet of paper coated with emulsion, the paper developed, fixed and washed under a red or amber safelight. The paper is the last film the light goes through, and like film it has a characteristic curve, a speed and a contrast.\n\nBlack-and-white papers come in grades, or today in one variable-contrast emulsion whose grade is chosen with yellow and magenta filters: a soft grade for a contrasty negative, a hard one for a flat negative. The enlarger matters too. A condenser enlarger shows a silver negative steeper than a diffuse light does, the Callier effect, about a grade harder; a contact print, the negative laid on the paper, has no enlarger lens to add flare. Color paper is printed through a head of yellow, magenta and cyan filters, set in CC units, to balance the color.\n\nHere the negative is printed on the paper you choose, at its grade or filtration and exposure, and the print is seen by reflection under D50 light, its white the display's white."
         "stage/print":
             return "In the cinema chain, the camera negative was printed onto print film: a fine-grained, high-contrast stock exposed through the negative by a printer, then developed. The print is a positive, meant to be projected.\n\nThe lab controlled color with printer lights: the red, green and blue intensities of the printer lamp, in steps called points. A timer chose them shot by shot, which is where the term color timing comes from. Raising a light adds density in that color's dye on the print.\n\nPrint film is steep: its contrast multiplies the negative's, and its dyes give the deep blacks and saturated, slightly crushed color of a film print. Kodak Vision Color Print Film 2383 was the release print stock of most films from the late 1990s on, and it is the print stock here."
         "stage/project":

@@ -60,7 +60,7 @@ pub func medium_color(medium: int) -> Color:
 ## The icon of stage `stage`, from the shared LuciaOS set.
 func icon_of(stage: int) -> str:
     return ["import", "eyedropper-tool", "light-sun", "camera", "filter", "texture", "fill-tool", "frame-selection",
-            "color-correction", "print", "play", "light-point", "visible", "crop-tool", "output-node"][stage]
+            "color-correction", "print", "play", "light-point", "visible", "crop-tool", "output-node", "layer"][stage]
 
 ## The color of family `category` (recipe.category_name): slate for the
 ## source, brass for the camera, a darkroom's red-brown for the chemistry, a
@@ -312,6 +312,11 @@ pub class RecipeView: Widget:
             let minutes = chosen if chosen > 0.0 else film.stock_process_time(stock, process)
             let seconds = int(minutes * 60.0 + 0.5)
             return f"{film.process_name(process)} · {seconds // 60}:{seconds % 60:02}"
+        if name == "Paper":
+            let paper = int(math.clamp(self.look.get("paper_stock"), 0.0, float(film.paper_total() - 1)))
+            if film.paper_is_color(paper):
+                return film.paper_name(paper)
+            return f"{film.paper_name(paper)} · grade {self.look.get("paper_grade")}"
         if recipe.stage_name(stage) == "View":
             return ["ACES 2.0", "Standard", "Linear", "Print"][int(math.clamp(self.look.get("view"), 0.0, 3.0))]
         return recipe.medium_name(recipe.stage_output(stage))
