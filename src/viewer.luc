@@ -258,13 +258,13 @@ pub class Viewer: Widget:
         self.drawn = place
         painter.image(picture, place)
 
-    ## While the grain is being rendered: how many samples a pixel are in, at
+    ## While the grain is being traced grain by grain: how much is done, at
     ## the photo's bottom left.
     func draw_refining(self, painter: Painter, place: Rect) -> unit!:
         let left = math.max(place.x, 0.0) + 10.0
         let bottom = math.min(place.y + place.height, self.pane.height) - 30.0
-        painter.rounded_rectangle(Rect(left, bottom, 132.0, 20.0), theme.grey(30.0), 4.0)
-        painter.text(f"Grain {self.developer.refined_samples()} / 256", left + 8.0, bottom + 3.0, theme.text())
+        painter.rounded_rectangle(Rect(left, bottom, 112.0, 20.0), theme.grey(30.0), 4.0)
+        painter.text(f"Grain {int(self.developer.refined_share() * 100.0)} %", left + 8.0, bottom + 3.0, theme.text())
 
     ## Outputs A and B compared: the line between them, with a handle to drag,
     ## and their letters at its top.
