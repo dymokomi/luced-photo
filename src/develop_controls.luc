@@ -480,7 +480,8 @@ pub class DevelopControls:
         self.tick()
 
     ## The essays about stage `stage` (-1: none) and what is chosen in it: the
-    ## stock; the process, and bleach bypass for a color negative.
+    ## stock; the process, and bleach bypass for a color negative or
+    ## cross-processing for a slide in C-41.
     func show_essays(self, stage: int) -> unit!:
         var keys = ["", "", ""]
         if stage >= 0:
@@ -490,7 +491,10 @@ pub class DevelopControls:
                 keys[1] = f"stock/{essays.slug(film.stock_name(self.stock()))}"
             elif name == "Develop":
                 keys[1] = f"process/{essays.slug(film.process_name(self.process()))}"
-                if film.stock_kind(self.stock()) == 0:
+                let kind = film.stock_kind(self.stock())
+                if kind == 1 and film.process_name(self.process()) == "C-41":
+                    keys[2] = "process/cross-processing"
+                elif kind == 0:
                     keys[2] = "process/bleach-bypass"
         var any = false
         for at in 0..<3:
