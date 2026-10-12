@@ -2,7 +2,7 @@
 ## press picks a stage and Properties shows only its sections; the left strip
 ## bypasses it and the right one displays it; Alt on an input cuts its wire and
 ## a drag from an output to an input wires it again (media must match); a Y
-## drag cuts the wires it crosses; Delete removes the picked stage; Tab's menu
+## drag cuts the wires it crosses; the right flags set outputs A and B; Delete removes the picked stage; Tab's menu
 ## adds one; a mode replaces the graph and the stock. Prints PASS or traps.
 from app import LucedPhoto
 from luce_ui.ui import Event
@@ -78,6 +78,14 @@ pub func main(arguments: list[str]) -> int!:
     press(view, exposure_right, exposure_y)
     assert(look.display_stage() == exposure)
     view.display(easel)
+
+    # Develop's inner right flag makes it output B, compared beside A; again,
+    # no comparing.
+    let (develop_b, develop_mid) = at(look, develop, 75.0, node_height * 0.5)
+    press(view, develop_b, develop_mid)
+    assert(look.compare_stage() == develop and look.comparing() and look.display_stage() == easel)
+    press(view, develop_b, develop_mid)
+    assert(look.compare_stage() == -1 and not look.comparing())
 
     # Alt on Develop's input cuts its wire; a drag from Film's output wires it again.
     let (develop_in, develop_y) = at(look, develop, node_width * 0.5, -2.0)

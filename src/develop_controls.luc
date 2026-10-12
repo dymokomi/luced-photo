@@ -23,6 +23,7 @@ from luce_develop.settings import Look, look
 from luce_develop import settings
 from luce_develop import film
 from luce_develop import recipe
+from luce_std import math
 
 ## The label column every section shares, so all the sliders line up.
 let label_width: float = 104.0
@@ -279,6 +280,9 @@ pub class DevelopControls:
                 self.look.set("tint", self.shot_tint)
             if name == "tint" and self.look.get("temperature") == 0.0:
                 self.look.set("temperature", self.shot_temperature)
+            # Another stock has another process: Develop shows its normal.
+            if name == "film_stock":
+                self.show_values()
         self.changed()
 
     func act(self, section: Section, name: str) -> unit!:
@@ -410,6 +414,14 @@ pub class DevelopControls:
                     section.panel.set_default(index, 0, self.shot_tint)
                     if self.look.get("temperature") == 0.0:
                         value = self.shot_tint
+                # Development defaults to the stock's process: its normal time
+                # and temperature, unmarked until moved.
+                if name in ["develop_time", "develop_temperature"]:
+                    let stock = self.stock()
+                    let normal = film.stock_time(stock) if name == "develop_time" else film.stock_temperature(stock)
+                    section.panel.set_default(index, 0, normal)
+                    if value == 0.0:
+                        value = normal
                 section.panel.set_value(index, value)
             if section.title == "Color Mixer":
                 self.show_mixer(section)
@@ -439,6 +451,10 @@ pub class DevelopControls:
             section.shown = picked and section.stage == stage
             section.panel.layout().set_visible(section.shown)
         self.tick()
+
+    ## The stock chosen (0-based).
+    func stock(self) -> int!:
+        return int(math.clamp(self.look.get("film_stock"), 1.0, float(film.stock_count()))) - 1
 
     ## Whether section `title` shows (its stage is picked, or in the recipe).
     pub func section_shown(self, title: str) -> bool:

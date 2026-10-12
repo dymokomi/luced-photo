@@ -2,12 +2,14 @@
 ## drawn as luced-3d draws its nodes (this is luced-photo's own, shaped for
 ## film). Each stage of the recipe (luce-develop's recipe.lucb) is luced-3d's
 ## node: its icon in the box, its name and detail beside it, its input on top
-## and its output below, so a recipe reads down like the process it is. A box
-## takes a tint of its family's color (the source, the camera, the chemistry,
-## the presentation); wires take the color of what flows on them (light, a
-## latent exposure, processed film, a scanned image, display light), and only
-## matching media connect. On a box, the left strip bypasses the stage (B) and
-## the right one makes it the displayed stage (D), which the viewer shows.
+## and its output below, so a recipe reads down like the process it is. Its
+## outline takes its family's color (the source, the camera, the chemistry, the
+## presentation); wires take the color of what flows on them (light, a latent
+## exposure, processed film, a scanned image, display light), and only matching
+## media connect. On a box, the left strip bypasses the stage (B); on the right,
+## the outer flag makes it output A, the stage the viewer shows (D), and the
+## inner one output B (Shift+D), shown beside A across a split line the viewer's
+## user drags.
 ##
 ## Drag a box to move it, drag from a port to another to wire them, Alt-click an
 ## input to cut its wire, or hold Y and drag across wires to cut them. Delete
@@ -30,8 +32,10 @@ import theme
 ## A node's box, as luced-3d's.
 pub let node_width: float = 96.0
 pub let node_height: float = 40.0
-## Where the bypass strip ends and the display flag begins, across a box.
+## Across a box: where the bypass strip ends, where output B's flag begins and
+## where output A's (the displayed one) begins.
 let bypass_edge: float = 13.5
+let compare_edge: float = 69.0
 let display_edge: float = 81.0
 ## Room for a node's caption, right of its box, when framing.
 let caption: float = 170.0
@@ -71,6 +75,10 @@ pub func category_color(category: int) -> Color:
             return theme.srgb(181.0, 84.0, 60.0)
         _:
             return theme.srgb(79.0, 127.0, 184.0)
+
+## Output B's flag: blue beside A's orange.
+func compare_color() -> Color:
+    return theme.srgb(91.0, 143.0, 214.0)
 
 ## `a` mixed with `amount` of `b`.
 func mix(a: Color, b: Color, amount: float) -> Color:
@@ -254,20 +262,25 @@ pub class RecipeView: Widget:
         let active = self.look.stage_active(stage)
         let shown = self.look.display_stage() == stage
         let radius = 3.0 * self.zoom
-        let ring = theme.accent() if stage == self.picked else (theme.text_muted() if stage == self.hovered else theme.grey(78.0))
-        p.rounded_rectangle(Rect(at.x - 1.5, at.y - 1.5, w + 3.0, h + 3.0), ring, radius + 1.5)
+        # The outline in the family's color, as luced-3d's picked outline is in
+        # its orange: full and thick when picked, quieter otherwise.
         let family = category_color(recipe.stage_category(stage))
-        p.rounded_rectangle(Rect(at.x, at.y, w, h), mix(theme.grey(64.0), family, 0.3) if active else theme.tab_strip(), radius)
+        let outline = 2.5 if stage == self.picked else 1.5
+        let ring = family if stage == self.picked or stage == self.hovered else mix(theme.grey(78.0), family, 0.55)
+        p.rounded_rectangle(Rect(at.x - outline, at.y - outline, w + outline * 2.0, h + outline * 2.0), ring, radius + outline)
+        p.rounded_rectangle(Rect(at.x, at.y, w, h), theme.grey(64.0) if active else theme.tab_strip(), radius)
         let ink = theme.text() if active else theme.text_muted()
         ui.draw_icon(p.target(), icon_of(stage), Rect(at.x + 36.0 * self.zoom, at.y + 8.0 * self.zoom, 24.0 * self.zoom, 24.0 * self.zoom), ink)
         p.text(recipe.stage_name(stage), at.x + 109.0 * self.zoom, at.y + (1.0 if self.zoom >= 0.65 else 10.0) * self.zoom, ink, self.font)
         if self.zoom >= 0.65:
             p.text(self.detail(stage), at.x + 109.0 * self.zoom, at.y + 22.0 * self.zoom, theme.text_muted(), self.font)
-        # Bypass on the left, the display flag on the right.
+        # Bypass on the left; outputs B and A on the right.
+        let compared = self.look.compare_stage() == stage
         p.rectangle(Rect(at.x + 3.0 * self.zoom, at.y + 5.0 * self.zoom, 9.0 * self.zoom, 30.0 * self.zoom), theme.accent() if bypassed else theme.border())
+        p.rectangle(Rect(at.x + 72.0 * self.zoom, at.y + 5.0 * self.zoom, 9.0 * self.zoom, 30.0 * self.zoom), compare_color() if compared else theme.border())
         p.rectangle(Rect(at.x + 84.0 * self.zoom, at.y + 5.0 * self.zoom, 9.0 * self.zoom, 30.0 * self.zoom), theme.accent() if shown else theme.border())
         if bypassed:
-            p.line(Point(at.x + 16.0 * self.zoom, at.y + 31.0 * self.zoom), Point(at.x + 78.0 * self.zoom, at.y + 9.0 * self.zoom), 1.0, theme.text_muted())
+            p.line(Point(at.x + 16.0 * self.zoom, at.y + 31.0 * self.zoom), Point(at.x + 68.0 * self.zoom, at.y + 9.0 * self.zoom), 1.0, theme.text_muted())
         if recipe.stage_input(stage) > 0:
             self.draw_port(p, self.port(stage, false), medium_color(recipe.stage_input(stage)), self.look.stage_source(stage) >= 0)
         if recipe.stage_output(stage) > 0:
@@ -281,6 +294,23 @@ pub class RecipeView: Widget:
             let stock = int(self.look.get("film_stock")) - 1
             if stock >= 0 and stock < film.stock_count():
                 return film.stock_name(stock)
+        let name = recipe.stage_name(stage)
+        if name == "White Balance":
+            let kelvin = self.look.get("temperature")
+            return "as shot" if kelvin == 0.0 else f"{int(kelvin + 0.5)} K"
+        if name == "Exposure":
+            let tenths = int(math.abs(self.look.get("exposure")) * 10.0 + 0.5)
+            let sign = "−" if self.look.get("exposure") < 0.0 else "+"
+            return f"{sign}{tenths // 10}.{tenths % 10} EV"
+        if name == "Filter":
+            let color = int(math.clamp(self.look.get("film_color_filter"), 0.0, 5.0))
+            return ["no filter", "yellow 8", "orange 21", "red 25", "green 11", "blue 47"][color] if int(self.look.get("film_filter")) != 2 else "85"
+        if recipe.stage_name(stage) == "Develop":
+            let stock = int(math.clamp(self.look.get("film_stock"), 1.0, float(film.stock_count()))) - 1
+            let chosen = self.look.get("develop_time")
+            let minutes = chosen if chosen > 0.0 else film.stock_time(stock)
+            let seconds = int(minutes * 60.0 + 0.5)
+            return f"{film.stock_process(stock)} · {seconds // 60}:{seconds % 60:02}"
         if recipe.stage_name(stage) == "View":
             return ["ACES 2.0", "Standard", "Linear", "Print"][int(math.clamp(self.look.get("view"), 0.0, 3.0))]
         return recipe.medium_name(recipe.stage_output(stage))
@@ -308,7 +338,9 @@ pub class RecipeView: Widget:
         if at.x < left + bypass_edge:
             return "Bypass (B)"
         if at.x >= left + display_edge:
-            return "Display (D)"
+            return "Output A: shown (D)"
+        if at.x >= left + compare_edge:
+            return "Output B: compared beside A (Shift+D)"
         return recipe.stage_description(self.hovered)
 
     # mark: editing =============================================================================
@@ -354,6 +386,13 @@ pub class RecipeView: Widget:
         if stage < 0 or self.look.display_stage() == stage:
             return
         self.look.set_display(stage)
+        self.changed()
+
+    ## Make `stage` output B, compared beside A; on B's stage, compare nothing.
+    pub func compare(self, stage: int) -> unit!:
+        if stage < 0:
+            return
+        self.look.set_compare(-1 if self.look.compare_stage() == stage else stage)
         self.changed()
 
     ## Start from mode `at`: its recipe and stock, framed.
@@ -406,6 +445,8 @@ pub class RecipeView: Widget:
                 self.remove_picked()
             elif event.key == Key.b:
                 self.toggle_bypass(self.picked)
+            elif event.key == Key.d and event.shift:
+                self.compare(self.picked)
             elif event.key == Key.d:
                 self.display(self.picked)
             elif event.key == Key.home:
@@ -483,6 +524,8 @@ pub class RecipeView: Widget:
             self.toggle_bypass(stage)
         elif at.x >= left + display_edge:
             self.display(stage)
+        elif at.x >= left + compare_edge:
+            self.compare(stage)
         else:
             self.mode = "move"
             self.moved = false

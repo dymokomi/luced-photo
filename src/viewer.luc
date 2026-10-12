@@ -71,6 +71,8 @@ pub class Viewer: Widget:
     var pane: Size = Size(0.0, 0.0)
     ## A drag panning the photo, from (`pan_x`, `pan_y`); the last press, for double-clicks.
     var panning: bool = false
+    ## Whether the A/B split line is being dragged.
+    var splitting: bool = false
     var pan_x: float = 0.0
     var pan_y: float = 0.0
     var pressed_at: float = 0.0
@@ -237,6 +239,8 @@ pub class Viewer: Widget:
             let place = self.placement(self.developer.output_width(), self.developer.output_height())
             self.drawn = place
             self.developer.draw(target, place.x, place.y, place.width, place.height)
+            if self.developer.is_comparing():
+                self.draw_split(painter, place)
             if self.guiding:
                 self.draw_guides(painter, place)
             if self.cropping:
@@ -247,6 +251,24 @@ pub class Viewer: Widget:
         let place = self.placement(float(picture.width()), float(picture.height()))
         self.drawn = place
         painter.image(picture, place)
+
+    ## Outputs A and B compared: the line between them, with a handle to drag,
+    ## and their letters at its top.
+    func draw_split(self, painter: Painter, place: Rect) -> unit!:
+        let x = self.split_x()
+        let top = math.max(place.y, 0.0)
+        let bottom = math.min(place.y + place.height, self.pane.height)
+        painter.rectangle(Rect(x - 1.0, top, 2.0, bottom - top), theme.text())
+        let middle = (top + bottom) * 0.5
+        painter.rounded_rectangle(Rect(x - 7.0, middle - 14.0, 14.0, 28.0), theme.text(), 7.0)
+        painter.rounded_rectangle(Rect(x - 3.0, middle - 9.0, 6.0, 18.0), theme.grey(60.0), 3.0)
+        for (letter, left) in [("A", x - 26.0), ("B", x + 8.0)]:
+            painter.rounded_rectangle(Rect(left, top + 8.0, 18.0, 18.0), theme.grey(30.0), 4.0)
+            painter.text(letter, left + 5.0, top + 9.0, theme.text())
+
+    ## Where the split line is across the pane.
+    func split_x(self) -> float:
+        return math.clamp(self.drawn.x + self.drawn.width * self.developer.split_at(), 0.0, self.pane.width)
 
     ## Where a `width` × `height` picture of the photo goes in the pane: fitted,
     ## or at the zoom about the center point.
@@ -478,6 +500,26 @@ pub class Viewer: Widget:
         if let tell = self.on_guides:
             tell(self.guides.copy())
 
+    ## Drag the A/B split line; whether the event was the line's.
+    func split_event(self, event: Event) -> bool!:
+        if not self.developer.is_comparing():
+            self.splitting = false
+            return false
+        let near = math.abs(event.x - self.split_x()) <= 7.0
+        if event.kind == EventKind.pointer_down and event.inside and event.button == 0 and near:
+            self.splitting = true
+            return true
+        if self.splitting and event.kind == EventKind.pointer_moved:
+            self.developer.set_split((event.x - self.drawn.x) / math.max(self.drawn.width, 1.0))
+            self.box.invalidate()
+            return true
+        if self.splitting and event.kind == EventKind.pointer_up:
+            self.splitting = false
+            return true
+        if event.kind == EventKind.pointer_moved and not self.panning and not self.guiding and not self.cropping:
+            self.box.set_cursor(Cursor.resize_horizontal if near else Cursor.arrow)
+        return false
+
     pub func event(self, event: Event) -> unit!:
         if self.drawn.width <= 0.0:
             return
@@ -497,6 +539,8 @@ pub class Viewer: Widget:
             else:
                 # Touchpad scrolling pans.
                 self.pan_by(event.scroll_x, event.scroll_y)
+            return
+        if self.split_event(event):
             return
         if self.panning:
             if event.kind == EventKind.pointer_moved:

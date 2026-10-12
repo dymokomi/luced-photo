@@ -1,6 +1,6 @@
 ## The Recipe pane: the selected photo's recipe as a graph (recipe_view.luc),
 ## with its menu (Tab or a right click): add a stage the recipe lacks, start
-## from a mode, and bypass, display or delete the picked stage.
+## from a mode, and bypass the picked stage, make it output A or B, or delete it.
 from luce_ui.ui import Panel, Size, ContextMenu, Command, Font
 from interop import Connection
 from luce_develop.settings import Look
@@ -15,6 +15,7 @@ pub class RecipePane:
     let adds: list[Command]
     let bypass_command: Command
     let display_command: Command
+    let compare_command: Command
     let delete_command: Command
     var connections: list[Connection] = []
 
@@ -36,14 +37,17 @@ pub class RecipePane:
             commands.append(command)
         commands.append(Command("", divider = true))
         self.bypass_command = Command("Bypass", id = "recipe_bypass")
-        self.display_command = Command("Display", id = "recipe_display")
+        self.display_command = Command("Output A", id = "recipe_display")
+        self.compare_command = Command("Output B", id = "recipe_compare")
         self.delete_command = Command("Delete Stage", id = "recipe_delete")
         self.connections.append(self.bypass_command.on_trigger(func () -> unit!:
             self.view.toggle_bypass(self.view.picked)))
         self.connections.append(self.display_command.on_trigger(func () -> unit!:
             self.view.display(self.view.picked)))
+        self.connections.append(self.compare_command.on_trigger(func () -> unit!:
+            self.view.compare(self.view.picked)))
         self.connections.append(self.delete_command.on_trigger(self.view.remove_picked))
-        commands = commands + [self.bypass_command, self.display_command, self.delete_command]
+        commands = commands + [self.bypass_command, self.display_command, self.compare_command, self.delete_command]
         self.menu = ContextMenu(self.view, commands, font = font)
         self.connections.append(self.menu.on_open(func () -> unit!:
             self.fit_menu(look)))
@@ -56,11 +60,12 @@ pub class RecipePane:
         for (stage, command) in self.adds.indexed():
             command.set_enabled(not look.has_stage(stage))
         let picked = self.view.picked >= 0
-        for command in [self.bypass_command, self.display_command, self.delete_command]:
+        for command in [self.bypass_command, self.display_command, self.compare_command, self.delete_command]:
             command.set_enabled(picked)
         if picked:
             self.bypass_command.set_checked(look.stage_bypassed(self.view.picked))
             self.display_command.set_checked(look.display_stage() == self.view.picked)
+            self.compare_command.set_checked(look.compare_stage() == self.view.picked)
 
     pub func close(self):
         for connection in self.connections:
