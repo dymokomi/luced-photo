@@ -79,7 +79,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "print_material", "print_optical"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -229,6 +229,11 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35 mm Academy=0|Super 35=1|16 mm=2|Super 16=4|65 mm 5-perf=3|IMAX 15/70=5"))
+        if title == "Print":
+            specs.insert(1, ParameterSpec(name = "print_material", label = "Print Film", kind = ParameterKind.menu,
+                                          items = "Kodak Vision 2383=0|Technicolor dye transfer=1"))
+            specs.append(ParameterSpec(name = "print_optical", label = "Optical Step", kind = ParameterKind.toggle,
+                                       doc = "An optical printer between negative and print: Super 35's squeeze, a 70 mm blow-up"))
         if title == "Paper":
             var papers: list[str] = []
             for at in 0..<film.paper_total():
@@ -259,7 +264,7 @@ pub class DevelopControls:
                                           items = "Matched=0|None=1|85 (daylight)=2|81A=3|81EF=4|½ Coral=5",
                                           doc = "Matched: balanced to the stock. None or 85: White Balance is the light on set, as the film saw it"))
             specs.insert(2, ParameterSpec(name = "film_color_filter", label = "Color Filter", kind = ParameterKind.menu,
-                                          items = "None=0|Yellow (8)=1|Orange (21)=2|Red (25)=3|Green (11)=4|Blue (47)=5",
+                                          items = "None=0|Yellow (8)=1|Orange (21)=2|Red (25)=3|Green (11)=4|Blue (47)=5|Chocolate 1=6|Chocolate 2=7|Chocolate 3=8",
                                           doc = "A color filter on the lens, as for black-and-white film; exposure opens up by its factor"))
         if title == "View":
             specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
@@ -528,6 +533,8 @@ pub class DevelopControls:
             let name = recipe.stage_name(stage)
             if name == "Film":
                 keys[1] = f"stock/{essays.slug(film.stock_name(self.stock()))}"
+            elif name == "Print":
+                keys[1] = "print/technicolor-dye-transfer" if self.look.get("print_material") > 0.5 else "print/kodak-vision-2383"
             elif name == "Paper":
                 keys[1] = f"paper/{essays.slug(film.paper_name(int(self.look.get("paper_stock"))))}"
             elif name == "Develop":
