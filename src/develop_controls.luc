@@ -71,7 +71,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -221,6 +221,10 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
+        if title == "Scan":
+            specs.insert(1, ParameterSpec(name = "scan_calibration", label = "Calibration", kind = ParameterKind.menu,
+                                          items = "Reference (Vision3 250D)=0|Matched to the stock=1",
+                                          doc = "Reference: the scanner set up once, each stock showing its own color. Matched: fitted to this stock, colors returned to themselves"))
         if title == "Develop":
             # Its items follow the stock (show_values): its standard process,
             # then the others of its family.
@@ -451,7 +455,7 @@ pub class DevelopControls:
                     section.panel.set_enabled(index, film.stock_kind(self.stock()) == 0)
                 if name in ["develop_time", "develop_temperature"]:
                     let process = self.process()
-                    let normal = film.process_time(process) if name == "develop_time" else film.process_temperature(process)
+                    let normal = film.stock_process_time(self.stock(), process) if name == "develop_time" else film.process_temperature(process)
                     section.panel.set_default(index, 0, normal)
                     if value == 0.0:
                         value = normal

@@ -309,7 +309,7 @@ pub class RecipeView: Widget:
             let stock = int(math.clamp(self.look.get("film_stock"), 1.0, float(film.stock_count()))) - 1
             let chosen = self.look.get("develop_time")
             let process = film.stock_process(stock, self.look.get("develop_process"))
-            let minutes = chosen if chosen > 0.0 else film.process_time(process)
+            let minutes = chosen if chosen > 0.0 else film.stock_process_time(stock, process)
             let seconds = int(minutes * 60.0 + 0.5)
             return f"{film.process_name(process)} · {seconds // 60}:{seconds % 60:02}"
         if recipe.stage_name(stage) == "View":
