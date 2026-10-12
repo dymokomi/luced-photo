@@ -180,7 +180,7 @@ pub class DevelopControls:
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
         if title == "View":
-            specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
+            specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2|Kodak 2383 Print=3"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
         return specs
 
