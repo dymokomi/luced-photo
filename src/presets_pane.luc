@@ -3,10 +3,12 @@
 ## footer saves the developed photo's settings as a new preset, saves them
 ## over the chosen one, renames it and deletes it; the row's menu (right-click)
 ## does the same for the row pressed. The presets live in the catalog
-## (presets.lucb), so they travel with the library.
+## (presets.lucb), so they travel with the library. After them come the film
+## looks luce-develop provides ("Film · …"), applied the same way and fixed.
 from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
 from interop import Connection
 from photo_library import PhotoLibrary
+from luce_develop import film
 
 pub class PresetsPane:
     pub let panel: Panel
@@ -75,6 +77,8 @@ pub class PresetsPane:
         var items: list[ListItem] = []
         for at in 0..<presets.count():
             items.append(ListItem(text = presets.name(at)))
+        for at in 0..<film.look_count():
+            items.append(ListItem(text = film.look_name(at)))
         self.rows.set_items(items)
         for at in 0..<presets.count():
             if presets.id(at) == chosen_id:
@@ -87,9 +91,10 @@ pub class PresetsPane:
         return at if at >= 0 and at < self.library.presets.count() else -1
 
     func fit_menu(self) -> unit!:
-        let any = self.chosen() >= 0
-        for command in [self.apply_command, self.update_command, self.rename_command, self.delete_command]:
-            command.set_enabled(any)
+        let own = self.chosen() >= 0
+        self.apply_command.set_enabled(self.rows.selected_index() >= 0)
+        for command in [self.update_command, self.rename_command, self.delete_command]:
+            command.set_enabled(own)
 
     ## The developed photo's settings, or none (and why) without one.
     func current_settings(self) -> str?!:
@@ -99,12 +104,15 @@ pub class PresetsPane:
         self.tell("Select a photo whose settings to keep.")
         return none
 
-    ## Stack the preset at `at` on the selected photos, as a click does.
+    ## Stack the preset at `at` (or the film look after the presets) on the
+    ## selected photos, as a click does.
     pub func apply(self, at: int) -> unit!:
-        if at < 0 or at >= self.library.presets.count():
-            return
-        if let tell = self.on_apply:
-            tell(self.library.presets.name(at), self.library.presets.settings(at))
+        let presets = self.library.presets
+        let tell = self.on_apply else return
+        if at >= 0 and at < presets.count():
+            tell(presets.name(at), presets.settings(at))
+        elif at >= presets.count() and at < presets.count() + film.look_count():
+            tell(film.look_name(at - presets.count()), film.look_text(at - presets.count()))
 
     # mark: saving =============================================================================
 
@@ -117,7 +125,7 @@ pub class PresetsPane:
     func update_chosen(self) -> unit!:
         let at = self.chosen()
         if at < 0:
-            self.tell("Choose a preset to update.")
+            self.tell("Choose one of your presets to update.")
             return
         let text = self.current_settings() else return
         let name = self.library.presets.name(at)
