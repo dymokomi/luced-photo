@@ -23,6 +23,7 @@ from luce_develop.settings import Look, look
 from luce_develop import settings
 from luce_develop import film
 from luce_develop import recipe
+from luce_develop import looks
 from luce_std import math
 import essays
 
@@ -233,7 +234,7 @@ pub class DevelopControls:
             # Matched balances the light to the stock as a white balance does;
             # with None or 85, White Balance is the light on set and the film sees it.
             specs.insert(1, ParameterSpec(name = "film_filter", label = "Balance", kind = ParameterKind.menu,
-                                          items = "Matched=0|None=1|85 (daylight)=2",
+                                          items = "Matched=0|None=1|85 (daylight)=2|81A=3|81EF=4|½ Coral=5",
                                           doc = "Matched: balanced to the stock. None or 85: White Balance is the light on set, as the film saw it"))
             specs.insert(2, ParameterSpec(name = "film_color_filter", label = "Color Filter", kind = ParameterKind.menu,
                                           items = "None=0|Yellow (8)=1|Orange (21)=2|Red (25)=3|Green (11)=4|Blue (47)=5",
@@ -590,3 +591,7 @@ test "every stage, stock and process has its essay":
     for process in 0..<film.process_total():
         assert(essays.essay_title(f"process/{essays.slug(film.process_name(process))}") != "")
     assert(essays.slug("Kodak Vision3 500T 5219") == "kodak-vision3-500t-5219")
+    for mode in 0..<recipe.mode_total():
+        assert(essays.essay_title(f"mode/{essays.slug(recipe.mode_name(mode))}") != "")
+    for picture in 0..<looks.count():
+        assert(essays.essay_title(f"look/{essays.slug(looks.name(picture))}") != "")

@@ -1,16 +1,19 @@
 ## The Recipes pane: the modes a recipe starts from (Television, Cinema, Slide,
-## Black & White: a graph of stages and a stock), the library's saved recipes
-## (a photo's recipe with every stage's values), and the film looks luce-develop
-## provides ("Film · …"). A click stacks the row on the selected photos
+## Black & White, Super Panavision 70: a graph of stages and a stock), the
+## library's saved recipes (a photo's recipe with every stage's values), and the
+## looks of particular pictures luce-develop documents ("Film · Munich (2005)").
+## A click stacks the row on the selected photos and shows its essay below the
+## list
 ## (develop_session.luc says how): a mode replaces their recipe and stock and
 ## keeps their values. The footer saves the developed photo's recipe as a new
 ## one, saves it over the chosen one, renames it and deletes it; the row's menu
 ## (right-click) does the same for the row pressed. Saved recipes live in the
 ## catalog (recipes.lucb), so they travel with the library.
-from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
+from luce_ui.ui import Text, Paragraph, Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
 from interop import Connection
 from photo_library import PhotoLibrary
-from luce_develop import film
+from luce_develop import looks
+import essays
 from luce_develop import recipe
 from luce_develop import settings
 
@@ -26,6 +29,9 @@ pub class RecipesPane:
     let rename_command: Command
     let delete_command: Command
     let font: Font
+    ## The clicked row's essay.
+    let about_title: Text
+    let about: Paragraph
     var connections: list[Connection] = []
     ## What the prompt asks for: "save" a new recipe's name or "rename" the
     ## recipe with id `renaming`.
@@ -61,7 +67,12 @@ pub class RecipesPane:
         self.connections.append(self.prompt.on_submit(self.submitted))
         self.confirm = ConfirmDialog(font = font)
         self.connections.append(self.confirm.on_choose(self.chosen_delete))
-        let content = VStack([self.row_menu, self.prompt, self.confirm], spacing = 0.0)
+        self.about_title = Text("", font = font)
+        self.about = Paragraph("", font = font, muted = true)
+        let essay = VStack([self.about_title, self.about], spacing = 6.0, padding = 6.0)
+        self.about_title.layout().set_visible(false)
+        self.about.layout().set_visible(false)
+        let content = VStack([self.row_menu, essay, self.prompt, self.confirm], spacing = 0.0)
         content.layout().set_flex()
         let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("save", self.update_chosen),
                            self.shelf_button("text-tool", self.rename_chosen), Spacer(), self.shelf_button("trash", self.delete_chosen)])
@@ -84,8 +95,8 @@ pub class RecipesPane:
             items.append(ListItem(text = f"Mode · {recipe.mode_name(at)}"))
         for at in 0..<recipes.count():
             items.append(ListItem(text = recipes.name(at)))
-        for at in 0..<film.look_count():
-            items.append(ListItem(text = film.look_name(at)))
+        for at in 0..<looks.count():
+            items.append(ListItem(text = f"Film · {looks.name(at)}"))
         self.rows.set_items(items)
         for at in 0..<recipes.count():
             if recipes.id(at) == chosen_id:
@@ -115,15 +126,31 @@ pub class RecipesPane:
     ## photos, as a click does.
     pub func apply(self, at: int) -> unit!:
         let recipes = self.library.recipes
-        let tell = self.on_apply else return
         let modes = recipe.mode_total()
+        self.show_essay(at)
+        let tell = self.on_apply else return
         if at >= 0 and at < modes:
             tell(recipe.mode_name(at), settings.mode_text(at))
         elif at >= modes and at < modes + recipes.count():
             tell(recipes.name(at - modes), recipes.settings(at - modes))
-        elif at >= modes + recipes.count() and at < modes + recipes.count() + film.look_count():
+        elif at >= modes + recipes.count() and at < modes + recipes.count() + looks.count():
             let look = at - modes - recipes.count()
-            tell(film.look_name(look), film.look_text(look))
+            tell(looks.name(look), looks.text(look))
+
+    ## The essay of row `at`: a mode's or a look's (a saved recipe has none).
+    func show_essay(self, at: int) -> unit!:
+        let recipes = self.library.recipes
+        let modes = recipe.mode_total()
+        var key = ""
+        if at >= 0 and at < modes:
+            key = f"mode/{essays.slug(recipe.mode_name(at))}"
+        elif at >= modes + recipes.count() and at < modes + recipes.count() + looks.count():
+            key = f"look/{essays.slug(looks.name(at - modes - recipes.count()))}"
+        let title = essays.essay_title(key)
+        self.about_title.set_text(title.upper())
+        self.about.set_text(essays.essay_text(key))
+        self.about_title.layout().set_visible(title != "")
+        self.about.layout().set_visible(title != "")
 
     # mark: saving =============================================================================
 

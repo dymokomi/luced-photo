@@ -19,6 +19,56 @@ pub func slug(name: str) -> str:
 ## The essay title for `key`, or "".
 pub func essay_title(key: str) -> str:
     match key:
+        "look/2001-a-space-odyssey-1968":
+            return "2001: A Space Odyssey (1968)"
+        "look/barry-lyndon-1975":
+            return "Barry Lyndon (1975)"
+        "look/days-of-heaven-1978":
+            return "Days of Heaven (1978)"
+        "look/fight-club-1999":
+            return "Fight Club (1999)"
+        "look/friends-seasons-1-5":
+            return "Friends, seasons 1–5"
+        "look/friends-seasons-6-10":
+            return "Friends, seasons 6–10"
+        "look/lawrence-of-arabia-1962":
+            return "Lawrence of Arabia (1962)"
+        "look/moonrise-kingdom-2012":
+            return "Moonrise Kingdom (2012)"
+        "look/munich-2005-bypassed-negative":
+            return "Munich (2005): the bypassed scenes"
+        "look/munich-2005":
+            return "Munich (2005)"
+        "look/nineteen-eighty-four-1984":
+            return "Nineteen Eighty-Four (1984)"
+        "look/o-brother-where-art-thou-2000":
+            return "O Brother, Where Art Thou? (2000)"
+        "look/oppenheimer-2023-black-and-white":
+            return "Oppenheimer (2023): black and white"
+        "look/oppenheimer-2023-color":
+            return "Oppenheimer (2023): color"
+        "look/saving-private-ryan-1998":
+            return "Saving Private Ryan (1998)"
+        "look/se7en-1995":
+            return "Se7en (1995)"
+        "look/the-french-dispatch-2021-black-and-white":
+            return "The French Dispatch (2021): black and white"
+        "look/the-godfather-1972":
+            return "The Godfather (1972)"
+        "look/three-kings-1999-cross-processed":
+            return "Three Kings (1999): cross-processed"
+        "look/three-kings-1999-the-base":
+            return "Three Kings (1999): the base"
+        "mode/black-white":
+            return "Black and white"
+        "mode/cinema":
+            return "Cinema: negative to print to screen"
+        "mode/slide":
+            return "Slide: reversal film on a lightbox"
+        "mode/super-panavision-70":
+            return "Super Panavision 70"
+        "mode/television":
+            return "Television: negative to tape"
         "process/bleach-bypass":
             return "Bleach bypass: leaving the silver in"
         "process/c-41":
@@ -91,6 +141,8 @@ pub func essay_title(key: str) -> str:
             return "White balance: the light on the set"
         "stock/eastman-color-negative-5251":
             return "Eastman Color Negative 5251"
+        "stock/eastman-color-negative-5254":
+            return "Eastman Color Negative 5254"
         "stock/eastman-double-x-5222":
             return "Eastman Double-X 5222"
         "stock/fujifilm-neopan-100-acros-ii":
@@ -139,6 +191,56 @@ pub func essay_title(key: str) -> str:
 ## The essay text for `key`, or "".
 pub func essay_text(key: str) -> str:
     match key:
+        "look/2001-a-space-odyssey-1968":
+            return "Kubrick and Geoffrey Unsworth shot 2001 in Super Panavision 70 on 65 mm Eastman Color Negative, very likely 5251; its faster successor 5254 was only presented in May 1968, after the premiere. The 70 mm prints came from MGM's Metrocolor lab; 35 mm prints were Technicolor dye-transfer reductions. The Dawn of Man was shot on a stage with front projection, and the Star Gate with slit-scan.\n\nThis look exposes 5251 on 65 mm, develops it in ECN-1, prints it on Vision 2383 standing in for the period print film, and projects it."
+        "look/barry-lyndon-1975":
+            return "Kubrick and John Alcott pushed the whole film a stop on 5254, so interiors and candlelit scenes matched. The candlelight was possible only with a Zeiss 50 mm f/0.7 lens built for NASA. On exteriors Alcott never used an 85 filter on the tungsten stock and took out the blue in printing, and a Tiffen Low Contrast No. 3 softened every shot.\n\nThis look uses 5254 pushed in ECN-1 (16 minutes, an inference) and prints it balanced, as the timer would have. The Low Contrast filter is not modelled."
+        "look/days-of-heaven-1978":
+            return "Néstor Almendros shot most of it at the magic hour, with no fill light. As the light went he pushed the negative a stop, then pulled the 85 filter to gain nearly a stop more, and finally slowed the camera. Nights were pushed one or two stops. The prints were blown up to 70 mm.\n\nAlmendros shot Kodak's 5247, the first ECN-2 negative, which is not here; EXR 200T 5293 stands in. This look pushes it a stop and takes off the 85, so the light falls on the film as it was."
+        "look/fight-club-1999":
+            return "Jeff Cronenweth rated his stocks at box speed and exposed generously, so the negatives were dense and printed down. Vision 500T 5279 carried the interiors and nights, some night exteriors were flashed about five percent in the lab, and a number of prints went through Technicolor's ENR at an infrared level of 0.80.\n\nThis look prints 5279 from Super 35 with silver kept at 0.80. The daylight stocks, EXR 5248 and Vision 250D 5246, are not modelled; for the flashed night exteriors, add 5 percent Flashing on the Film stage."
+        "look/friends-seasons-1-5":
+            return "Friends was shot on 35 mm Panavision negative under the bright, warm light of a multi-camera sitcom stage, developed and transferred on a telecine to standard-definition tape, never printed. No source names its stocks; a fast tungsten Kodak negative of the EXR line is the likely choice for the early years.\n\nThis look uses EXR 500T 5298 through the television chain, its telecine timing warm and a little magenta, flatter and grainier, matched to the cast of the broadcast's own frames."
+        "look/friends-seasons-6-10":
+            return "The later seasons look brighter and cleaner, consistent with Kodak's Vision stocks, which replaced EXR from 1996, and with changes in the show's telecine work.\n\nThis look uses Vision 500T 5279 through the television chain, timed warmer and less magenta than the early seasons and with less grain, matched to the broadcast's frames. As for the early seasons, the stock is an inference: no source names it."
+        "look/lawrence-of-arabia-1962":
+            return "Freddie Young photographed the desert in Super Panavision 70 on 65 mm Eastman Color negative, for 70 mm prints. The mirage was shot on a Panavision telephoto of over 400 mm. \"I just shot outdoors and stopped down,\" Young said.\n\nThe negative was most likely 5250, which 5251 replaced at the same speed in 1962; 5251 stands in. This look exposes it on 65 mm through an 85 filter, as a tungsten stock in daylight needs, develops it in ECN-1, prints and projects it. Period print stock is not modelled: Vision 2383 stands in."
+        "look/moonrise-kingdom-2012":
+            return "Robert Yeoman shot every frame on Kodak Vision3 200T in Super 16, the 500-speed stocks being too grainy for Wes Anderson, with no filtration, not even an 85 in daylight. The palettes are the production's design; in the grade, Yeoman says, Anderson takes the look a bit warmer and pushes the saturation.\n\nThis look uses Vision3 200T on 16 mm through the scan and grade, warmer and more saturated. The amounts are an inference from his account."
+        "look/munich-2005-bypassed-negative":
+            return "For the semi-documentary scenes, the refugee camps and the Munich assault, the bleach was skipped on the camera negative itself, at Technicolor in Los Angeles and London and at Éclair in Paris. Silver left on a negative sits in the scene's highlights, so whites blow out. To tame the contrast the negative was pulled one and a half stops: \"It's almost like shooting color reversal,\" Kamiński said. The prints then also had ENR, so the film stacks both.\n\nThis look keeps all the negative's silver, develops it for about 2:10 instead of 3:00 (Kodak tables a one-stop pull at 2:30; the extra half stop is extrapolated), and prints with ENR at 0.70."
+        "look/munich-2005":
+            return "Janusz Kamiński shot Munich in Super 35 on Kodak Vision 500T 5279, EXR 200T 5293 and Fuji negatives, and every release print went through Technicolor's ENR at an infrared level of 65 to 75. ENR adds a black-and-white development bath that leaves silver in the print where it is dense, so blacks turn rich and colors drain. It was not the first film to keep silver: Kamiński had used ENR on Amistad and Saving Private Ryan, and bleach bypass goes back to 1960.\n\nThis look prints 5279 on Vision 2383 with its silver kept at an infrared density of 0.70. The Fuji stocks of the Middle East scenes are not modelled."
+        "look/nineteen-eighty-four-1984":
+            return "Roger Deakins had the bleach bypassed on all the prints, at Kays Laboratory in London, rather than on the camera negative. Earlier home releases did not show it; Deakins has said only the recent Criterion release reflects the intent. Darius Khondji named it as an inspiration for Delicatessen.\n\nThis look prints with all the silver kept, an infrared density of 2.40. The camera negative is not documented: EXR 200T stands in."
+        "look/o-brother-where-art-thou-2000":
+            return "The Coens and Roger Deakins wanted the faded look of hand-tinted postcards: dry, golden fields. Bleach bypass and Deluxe's ACE were tested and rejected because they drain all colors alike. Instead the whole film was scanned at 2K, and for ten weeks colorist Julius Friede at Cinesite turned the greens of grass and trees toward dry yellows and browns, then recorded it back to film. It was the first feature finished entirely through a digital intermediate.\n\nThis look runs Vision 500T 5279 from Super 35 through the scan and grade, turning greens toward yellow and lowering their saturation. The amounts are an inference from the accounts."
+        "look/oppenheimer-2023-black-and-white":
+            return "For Strauss's timeline Kodak made Double-X 5222 in 65 mm for the first time, prototype cans with handwritten labels. FotoKem had never processed 65 mm black and white, and refilled a 65 mm processor with black-and-white chemistry for it. The cameras needed new gates for the stock's thickness.\n\nThis look uses Double-X on 65 mm, developed and scanned. Its rating, developer and print stock were not published."
+        "look/oppenheimer-2023-color":
+            return "Hoyte van Hoytema shot on 65 mm, IMAX 15-perforation and Panavision System 65: Vision3 250D for exteriors and bright interiors, 500T for low light. The color scenes are Oppenheimer's own point of view. FotoKem printed everything, and IMAX 70 mm, 70 mm and 35 mm film prints went out, with a digital master matched to them.\n\nThis look uses Vision3 250D on 65 mm, printed and projected. The IMAX frame, larger still, is not modelled."
+        "look/saving-private-ryan-1998":
+            return "Kamiński shot EXR 200T 5293 pushed a stop to 400, with a half Coral filter where an 85 would normally go, for a slightly blue cast. A Panaflasher flashed the negative about 15 percent, so the blacks would not be sharp and the color would desaturate, and the prints went through ENR, which the lab ran at an infrared level of 1.00, \"one of the highest levels of ENR used to date.\" Panavision stripped the coatings off his lenses for flare and flat contrast, and a 45 or 90 degree shutter froze every grain of sand.\n\nThis look sets all of that except the uncoated lenses and the shutter, which are not modelled. The half Coral's strength is an estimate."
+        "look/se7en-1995":
+            return "Darius Khondji wanted color noir, blacks as deep as black and white could give. Interiors were shot on EXR 200T 5293 at box speed, in Super 35, nearly wide open. A number of the release prints went through Deluxe's new CCE process, which keeps about three quarters of the print's silver: \"to get those beautiful blacks, it would drain out a lot of the color.\" Color drained in the lab was put back by the art department.\n\nThis look prints 5293 with its silver kept at an infrared density of 1.85, CCE's level. The film's other stocks, 5245 for exteriors and 5287 pushed a stop for nights, are not modelled."
+        "look/the-french-dispatch-2021-black-and-white":
+            return "About half of The French Dispatch is in black and white, shot on real black-and-white negative, Kodak's Eastman Double-X 5222, not desaturated color. Robert Yeoman had both stocks processed normally, \"without any push or pull,\" in Paris, in Super 35.\n\nThis look uses Double-X on Super 35, developed normally and scanned."
+        "look/the-godfather-1972":
+            return "Gordon Willis rated Eastman Color Negative at 250 and had it pushed a stop, \"theoretically a half-stop underexposure,\" lit from overhead and printed on one light for the whole film, with what he called a brassy yellow. The release prints were Technicolor dye transfer, and Sicily was shot through chocolate filters.\n\nThis look uses Eastman Color Negative 5254, half a stop under and pushed in ECN-1 (Kodak never tabled pushing it; 16 minutes is an inference), printed warm and yellow. The printer lights are an inference from Willis's words, and dye-transfer printing and chocolate filters are not modelled."
+        "look/three-kings-1999-cross-processed":
+            return "Once the characters leave the base, Sigel shot Ektachrome that Kodak made for the production and cross-processed it in negative chemistry: the crew signed a waiver, a small lab ran it, and \"off a half a stop, you were shit out of luck.\"\n\nThis look exposes Ektachrome E100, the nearest Ektachrome here, develops it in C-41 as a negative and prints it: harsh contrast, a clear base with no mask, and loud, shifted color."
+        "look/three-kings-1999-the-base":
+            return "For the opening on the American base, Newton Thomas Sigel skip-bleached the camera negative, \"not in the print, but in the negative, which is much more radical.\" David O. Russell's reference was newspaper color photos of the Gulf War, \"very contrasty,\" that \"blow out.\"\n\nThe stock was a Kodak daylight negative, most likely Vision 250D 5246; Vision3 250D stands in. This look keeps all the negative's silver and prints it."
+        "mode/black-white":
+            return "Black-and-white negative, developed in a developer of your choice and scanned. A color filter on the lens decides which colors become light or dark grey, and the developer decides speed, grain, sharpness and how the highlights are held.\n\nThis mode puts a Filter stage before the film for that reason, and starts from Fujifilm Acros II in D-76. Try Tri-X in Rodinal for sharp, gritty grain, or a red filter for dark skies."
+        "mode/cinema":
+            return "The classic chain of feature films until the digital intermediate took over in the 2000s. The camera negative was developed, timed with printer lights, printed onto a high-contrast print film and projected in a dark theater.\n\nHere the negative is printed on Kodak Vision 2383 and projected under a xenon arc. The print's own curve and dyes are the tone scale: deep blacks, saturated midtones, highlights that roll off. Printer lights time the color, and the print's silver can be kept, as Technicolor's ENR and Deluxe's CCE did."
+        "mode/slide":
+            return "Reversal film becomes the picture itself: developed in E-6, it is a positive, seen on a light table or projected. There is no negative, no print and no scanner's correction, so what the film does to color and contrast is what you see.\n\nThis mode exposes a slide stock, develops it, and shows it on a D50 lightbox. Slides have little latitude: expose carefully, and expect their saturated, contrasty character."
+        "mode/super-panavision-70":
+            return "A large-format process of the late 1950s and 1960s: spherical lenses on 65 mm negative running five perforations a frame, a picture 52.48 by 23.01 mm, nearly three and a half times the area of a 35 mm frame. Release prints were 70 mm, with room for six magnetic sound tracks. Lawrence of Arabia and 2001: A Space Odyssey were shot this way.\n\nThis mode exposes Eastman Color Negative 5251 on 65 mm, develops it in the period's ECN-1, prints and projects it. The large frame means the grain and softness of the film are small against the picture."
+        "mode/television":
+            return "From the 1950s into the 2000s most American television drama and comedy was shot on 35 mm negative and never printed. The negative was developed, then run through a telecine, a scanner that turned it straight into video while a colorist set its color scene by scene.\n\nThis mode is that chain: the camera's light, the film and its development, the scan, the colorist's grade, a display rendering, and the framing. It is the default because it is also how film is mostly seen today: scanned."
         "process/bleach-bypass":
             return "In a normal color process, the bleach turns all the developed silver back into halide and the fixer washes it away, leaving only the dyes. Skip the bleach, or weaken it, and a black-and-white silver image stays on top of the color one. Kodak puts it simply: the retained silver increases contrast and decreases color saturation.\n\nThe cinematographer Kazuo Miyagawa, who had trained as a chemist, invented it for Kon Ichikawa's Her Brother in 1960. Labs later made it controllable: Technicolor's ENR, named for Ernesto Novelli Rimo, who devised it for Vittorio Storaro on Reds, and Deluxe's CCE, which left about three quarters of the silver in the prints of Seven. Saving Private Ryan used one of the strongest ENR levels Technicolor had run, to drain color from faces.\n\nDone to the negative, as here, the silver sits where the negative is dense: in the scene's highlights. The lab's scan, set for a bleached negative, reads it as extra exposure, so highlights crowd together and colors fade. Labs advise underexposing about a stop. The silver can be bleached later, so a bypassed negative is not lost."
         "process/c-41":
@@ -211,6 +313,8 @@ pub func essay_text(key: str) -> str:
             return "Light has a color. A tungsten lamp burns at about 3200 K and gives warm, orange light; daylight is near 5500 to 6500 K and bluer. Our eyes adapt and see a white shirt as white under both. Film does not adapt: it is made for one kind of light.\n\nMotion picture stocks come in two balances. Tungsten (T) stocks such as Vision3 500T expect 3200 K studio lamps; daylight (D) stocks expect the sun. Shooting tungsten film outdoors gives a strong blue cast unless an orange 85 filter is put on the lens, at the cost of two thirds of a stop.\n\nHere, Temperature and Tint describe the light the scene was lit by. Left as shot, they are the camera's own estimate. With the Filter node's Balance set to Matched, the light is balanced to the stock, as a lab would; set to None, the film sees the light as it was, color cast and all."
         "stock/eastman-color-negative-5251":
             return "Eastman Color Negative 5251 was Kodak's tungsten camera negative of the 1960s, introduced in 1962 to replace 5250 with finer grain and better color. It was rated EI 50 at 3200 K and was developed in the original ECN process (later called ECN-1): 12 minutes in SD-30 at 21 °C, with a ferricyanide bleach. Prints were made on Eastman Color Print 5385.\n\n2001: A Space Odyssey was photographed in Super Panavision 70, on 65 mm negative with spherical lenses, and released in 70 mm prints from April 1968. The common technical listings name the camera stock as Eastman 5251. That fits the dates: its faster successor, 5254, was only presented to the SMPTE in May 1968, after the premiere, so 5251 is very likely, though no Kodak or production document we have names it.\n\nNo data sheet for 5251 survives online. The curves here come from Kodak's 1968 SMPTE paper on 5254, which states that the new film has the same structure, the same spectral sensitivities and the same dyes as 5251, and is one stop faster; the curves are moved one stop to account for that. The paper's exposure axis carries no numbers, so where normal exposure falls is an estimate, and it publishes no grain or sharpness data."
+        "stock/eastman-color-negative-5254":
+            return "Kodak presented 5254 to the SMPTE in May 1968 as its new camera negative: the same structure, spectral sensitivities and dyes as 5251, and one stop faster, rated 100 under tungsten light. It was developed in ECN-1, and it carried American features into the early 1970s, until ECN-2 and 5247 replaced it.\n\nIt is the negative of much of the New Hollywood. Gordon Willis rated it at 250 and pushed it a stop for The Godfather, and Stanley Kubrick and John Alcott pushed the whole of Barry Lyndon a stop on it, its candlelit scenes lit by candles alone through a Zeiss f/0.7 lens.\n\nNo data sheet for 5254 survives online. Since Kodak's own paper says it is 5251 a stop faster, it is built here from 5251's curves moved one stop; its grain, coarser for the speed, is an estimate."
         "stock/eastman-double-x-5222":
             return "Double-X is Kodak's black-and-white camera negative for motion pictures, usually dated to 1959 and still made today in 35 mm (5222) and 16 mm (7222). It is a fast panchromatic film, rated EI 250 in daylight and 200 under tungsten for development to a gamma of 0.65.\n\nLaboratories develop it in D-96, a developer made for motion picture black-and-white work, and the development time sets the contrast. Kodak's 2022 sheet shows the range: 4 minutes gives a gamma of 0.50 and 12 minutes 1.05, with 6½ minutes landing at the recommended 0.66. Its diffuse rms granularity is 14, and its resolving power is 100 lines per millimetre at high contrast.\n\nStill photographers know it as CineStill bwXX, which is Double-X respooled for 35 mm cameras."
         "stock/fujifilm-neopan-100-acros-ii":
