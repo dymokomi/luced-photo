@@ -115,7 +115,7 @@ pub class Panels:
         let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_folder), Spacer(),
                               Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
-                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.watch_development], font = font),
+                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.watch_development, actions.refine_grain], font = font),
                               Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.sync_settings, actions.reset_settings], font = font),
                               Menu("Window", [actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
         self.dock = DStack([self.viewer.panel], font = font)
@@ -192,6 +192,10 @@ pub class Panels:
             let on = not actions.watch_development.is_checked()
             actions.watch_development.set_checked(on)
             self.viewer.watch_development(on)))
+        self.connections.append(actions.refine_grain.on_trigger(func () -> unit!:
+            let on = not actions.refine_grain.is_checked()
+            actions.refine_grain.set_checked(on)
+            self.viewer.refine_grain(on)))
         self.connections.append(actions.palette.on_trigger(func () -> unit!:
             self.palette.open()))
         self.connections.append(actions.quit.on_trigger(func () -> unit!:
