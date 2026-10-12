@@ -19,6 +19,8 @@ pub func slug(name: str) -> str:
 ## The essay title for `key`, or "".
 pub func essay_title(key: str) -> str:
     match key:
+        "process/bleach-bypass":
+            return "Bleach bypass: leaving the silver in"
         "process/c-41":
             return "C-41: the color negative process for still film"
         "process/d-76-1-1":
@@ -103,6 +105,8 @@ pub func essay_title(key: str) -> str:
 ## The essay text for `key`, or "".
 pub func essay_text(key: str) -> str:
     match key:
+        "process/bleach-bypass":
+            return "In a normal color process, the bleach turns all the developed silver back into halide and the fixer washes it away, leaving only the dyes. Skip the bleach, or weaken it, and a black-and-white silver image stays on top of the color one. Kodak puts it simply: the retained silver increases contrast and decreases color saturation.\n\nThe cinematographer Kazuo Miyagawa, who had trained as a chemist, invented it for Kon Ichikawa's Her Brother in 1960. Labs later made it controllable: Technicolor's ENR, named for Ernesto Novelli Rimo, who devised it for Vittorio Storaro on Reds, and Deluxe's CCE, which left about three quarters of the silver in the prints of Seven. Saving Private Ryan used one of the strongest ENR levels Technicolor had run, to drain color from faces.\n\nDone to the negative, as here, the silver sits where the negative is dense: in the scene's highlights. The lab's scan, set for a bleached negative, reads it as extra exposure, so highlights crowd together and colors fade. Labs advise underexposing about a stop. The silver can be bleached later, so a bypassed negative is not lost."
         "process/c-41":
             return "C-41 is the color negative process of still photography, introduced by Kodak in 1972 together with Kodacolor II. It runs at 37.8 °C (100 °F) with a developer time of three minutes fifteen seconds, and every minilab in the world could run it, which made color negative film the film of family snapshots for decades.\n\nIts developing agent, CD-4, is more active than ECN-2's. Still films are made for it, and need no rem-jet removal. Motion picture film run through C-41, as some labs do, comes out denser and more contrasty than in ECN-2, and its rem-jet has to be dealt with.\n\nKodak's push rule for C-41 is thirty seconds more per stop: 3:45 for one stop, 4:15 for two. A push raises contrast, the blue layer's most, and grain, but adds little real shadow speed: the shadows of an underexposed negative stay thin."
         "process/d-76-1-1":

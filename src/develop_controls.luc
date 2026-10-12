@@ -156,9 +156,16 @@ pub class DevelopControls:
             widgets.append(section.panel)
             if let extra = section.extra:
                 widgets.append(extra)
-        self.about_titles = [Text("", font = font), Text("", font = font)]
-        self.about_texts = [Paragraph("", font = font, muted = true), Paragraph("", font = font, muted = true)]
-        self.about = VStack([Rule(), self.about_titles[0], self.about_texts[0], self.about_titles[1], self.about_texts[1]], spacing = 8.0, padding = 6.0)
+        self.about_titles = []
+        self.about_texts = []
+        var about: list[Widget] = [Rule()]
+        for _ in 0..<3:
+            let title = Text("", font = font)
+            let text = Paragraph("", font = font, muted = true)
+            self.about_titles.append(title)
+            self.about_texts.append(text)
+            about = about + [title, text]
+        self.about = VStack(about, spacing = 8.0, padding = 6.0)
         widgets.append(self.about)
         self.body = VStack(widgets, spacing = 0.0)
         self.show_values()
@@ -432,6 +439,9 @@ pub class DevelopControls:
                 # and temperature, unmarked until moved.
                 if name == "develop_process":
                     section.panel.set_items(index, film.stock_processes(self.stock()))
+                # Only a color negative's silver is extra to its image.
+                if name == "develop_silver":
+                    section.panel.set_enabled(index, film.stock_kind(self.stock()) == 0)
                 if name in ["develop_time", "develop_temperature"]:
                     let process = self.process()
                     let normal = film.process_time(process) if name == "develop_time" else film.process_temperature(process)
@@ -469,9 +479,10 @@ pub class DevelopControls:
             section.panel.layout().set_visible(section.shown)
         self.tick()
 
-    ## The essays about stage `stage` (-1: none) and what is chosen in it.
+    ## The essays about stage `stage` (-1: none) and what is chosen in it: the
+    ## stock; the process, and bleach bypass for a color negative.
     func show_essays(self, stage: int) -> unit!:
-        var keys = ["", ""]
+        var keys = ["", "", ""]
         if stage >= 0:
             keys[0] = f"stage/{recipe.stage_key(stage)}"
             let name = recipe.stage_name(stage)
@@ -479,8 +490,10 @@ pub class DevelopControls:
                 keys[1] = f"stock/{essays.slug(film.stock_name(self.stock()))}"
             elif name == "Develop":
                 keys[1] = f"process/{essays.slug(film.process_name(self.process()))}"
+                if film.stock_kind(self.stock()) == 0:
+                    keys[2] = "process/bleach-bypass"
         var any = false
-        for at in 0..<2:
+        for at in 0..<3:
             let title = essays.essay_title(keys[at])
             self.about_titles[at].set_text(title.upper())
             self.about_texts[at].set_text(essays.essay_text(keys[at]))
