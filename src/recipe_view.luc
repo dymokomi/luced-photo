@@ -60,7 +60,7 @@ pub func medium_color(medium: int) -> Color:
 ## The icon of stage `stage`, from the shared LuciaOS set.
 func icon_of(stage: int) -> str:
     return ["import", "eyedropper-tool", "light-sun", "camera", "filter", "texture", "fill-tool", "frame-selection",
-            "color-correction", "print", "play", "light-point", "visible", "crop-tool"][stage]
+            "color-correction", "print", "play", "light-point", "visible", "crop-tool", "output-node"][stage]
 
 ## The color of family `category` (recipe.category_name): slate for the
 ## source, brass for the camera, a darkroom's red-brown for the chemistry, a

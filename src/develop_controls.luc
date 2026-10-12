@@ -221,7 +221,7 @@ pub class DevelopControls:
                 stocks.append(f"{film.stock_name(at)}={at + 1}")
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
-                                          items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
+                                          items = "35 mm Academy=0|Super 35=1|16 mm=2|Super 16=4|65 mm 5-perf=3|IMAX 15/70=5"))
         if title == "Scan":
             specs.insert(1, ParameterSpec(name = "scan_calibration", label = "Calibration", kind = ParameterKind.menu,
                                           items = "Reference (Vision3 250D)=0|Matched to the stock=1",
