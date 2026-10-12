@@ -16,7 +16,7 @@
 ##
 ## The controls edit a Look (luce-develop's settings) and call `on_change` after
 ## every edit; `show` loads a photo's settings without calling it.
-from luce_ui.ui import VStack, HStack, Text, Font, Widget, ParameterPanel, ParameterSpec, ParameterKind, CurveEditor, ColorWheel, Button, Size
+from luce_ui.ui import VStack, HStack, Text, Paragraph, Rule, Font, Widget, ParameterPanel, ParameterSpec, ParameterKind, CurveEditor, ColorWheel, Button, Size
 from luce_ui import ui
 from interop import Connection
 from luce_develop.settings import Look, look
@@ -24,6 +24,7 @@ from luce_develop import settings
 from luce_develop import film
 from luce_develop import recipe
 from luce_std import math
+import essays
 
 ## The label column every section shares, so all the sliders line up.
 let label_width: float = 104.0
@@ -63,7 +64,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -133,6 +134,11 @@ pub class DevelopControls:
     ## The picked stage (-1 none), named over its sections.
     var stage: int = -1
     let stage_title: Text
+    ## Under the stage's sections: an essay about the stage, then one about
+    ## what is chosen in it (the stock, the process), each under its title.
+    let about: VStack
+    let about_titles: list[Text]
+    let about_texts: list[Paragraph]
 
     pub func init(self, font: Font) -> unit!:
         self.look = look("")
@@ -150,6 +156,10 @@ pub class DevelopControls:
             widgets.append(section.panel)
             if let extra = section.extra:
                 widgets.append(extra)
+        self.about_titles = [Text("", font = font), Text("", font = font)]
+        self.about_texts = [Paragraph("", font = font, muted = true), Paragraph("", font = font, muted = true)]
+        self.about = VStack([Rule(), self.about_titles[0], self.about_texts[0], self.about_titles[1], self.about_texts[1]], spacing = 8.0, padding = 6.0)
+        widgets.append(self.about)
         self.body = VStack(widgets, spacing = 0.0)
         self.show_values()
 
@@ -197,6 +207,10 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
+        if title == "Develop":
+            # Its items follow the stock (show_values): its standard process,
+            # then the others of its family.
+            specs.insert(1, ParameterSpec(name = "develop_process", label = "Process", kind = ParameterKind.menu, items = "Standard=0"))
         if title == "Filter":
             # Matched balances the light to the stock as a white balance does;
             # with None or 85, White Balance is the light on set and the film sees it.
@@ -280,8 +294,8 @@ pub class DevelopControls:
                 self.look.set("tint", self.shot_tint)
             if name == "tint" and self.look.get("temperature") == 0.0:
                 self.look.set("temperature", self.shot_temperature)
-            # Another stock has another process: Develop shows its normal.
-            if name == "film_stock":
+            # Another stock or process: Develop shows its processes and normals.
+            if name == "film_stock" or name == "develop_process":
                 self.show_values()
         self.changed()
 
@@ -416,9 +430,11 @@ pub class DevelopControls:
                         value = self.shot_tint
                 # Development defaults to the stock's process: its normal time
                 # and temperature, unmarked until moved.
+                if name == "develop_process":
+                    section.panel.set_items(index, film.stock_processes(self.stock()))
                 if name in ["develop_time", "develop_temperature"]:
-                    let stock = self.stock()
-                    let normal = film.stock_time(stock) if name == "develop_time" else film.stock_temperature(stock)
+                    let process = self.process()
+                    let normal = film.process_time(process) if name == "develop_time" else film.process_temperature(process)
                     section.panel.set_default(index, 0, normal)
                     if value == 0.0:
                         value = normal
@@ -447,14 +463,39 @@ pub class DevelopControls:
             elif not self.look.stage_active(stage):
                 state = "  ·  not on the displayed path"
             self.stage_title.set_text(recipe.stage_name(stage).upper() + state)
+        self.show_essays(stage if picked else -1)
         for section in self.sections:
             section.shown = picked and section.stage == stage
             section.panel.layout().set_visible(section.shown)
         self.tick()
 
+    ## The essays about stage `stage` (-1: none) and what is chosen in it.
+    func show_essays(self, stage: int) -> unit!:
+        var keys = ["", ""]
+        if stage >= 0:
+            keys[0] = f"stage/{recipe.stage_key(stage)}"
+            let name = recipe.stage_name(stage)
+            if name == "Film":
+                keys[1] = f"stock/{essays.slug(film.stock_name(self.stock()))}"
+            elif name == "Develop":
+                keys[1] = f"process/{essays.slug(film.process_name(self.process()))}"
+        var any = false
+        for at in 0..<2:
+            let title = essays.essay_title(keys[at])
+            self.about_titles[at].set_text(title.upper())
+            self.about_texts[at].set_text(essays.essay_text(keys[at]))
+            self.about_titles[at].layout().set_visible(title != "")
+            self.about_texts[at].layout().set_visible(title != "")
+            any = any or title != ""
+        self.about.layout().set_visible(any)
+
     ## The stock chosen (0-based).
     func stock(self) -> int!:
         return int(math.clamp(self.look.get("film_stock"), 1.0, float(film.stock_count()))) - 1
+
+    ## The process the stock develops in (an index into film's processes).
+    func process(self) -> int!:
+        return film.stock_process(self.stock(), self.look.get("develop_process"))
 
     ## Whether section `title` shows (its stage is picked, or in the recipe).
     pub func section_shown(self, title: str) -> bool:
@@ -512,3 +553,12 @@ pub class DevelopControls:
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()
+
+test "every stage, stock and process has its essay":
+    for stage in 0..<recipe.stage_total():
+        assert(essays.essay_title(f"stage/{recipe.stage_key(stage)}") != "")
+    for stock in 0..<film.stock_count():
+        assert(essays.essay_title(f"stock/{essays.slug(film.stock_name(stock))}") != "")
+    for process in 0..<film.process_total():
+        assert(essays.essay_title(f"process/{essays.slug(film.process_name(process))}") != "")
+    assert(essays.slug("Kodak Vision3 500T 5219") == "kodak-vision3-500t-5219")
