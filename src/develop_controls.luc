@@ -1,6 +1,6 @@
 ## The develop's controls in the Properties pane. Each section of luce-develop's
-## parameter table (White Balance, Exposure & Tone, Levels, Curves, Color, Color
-## Mixer, Color Grading, Black & White, Lens, Geometry, Effects, View) is a
+## parameter table (White Balance, Exposure & Tone, Film, Levels, Curves, Color,
+## Color Mixer, Color Grading, Black & White, Lens, Geometry, Effects, View) is a
 ## luce-ui ParameterPanel with one folder heading, the same rows luced-2d and
 ## luced-3d use: right-aligned labels in one fixed column, a typeable field and
 ## an equal-length slider per number, gradient tracks where color or light helps
@@ -22,7 +22,7 @@ let label_width: float = 104.0
 
 ## The sections in the order they show, and those that start open.
 func section_order() -> list[str]:
-    return ["White Balance", "Exposure & Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Geometry", "Crop", "Effects", "View"]
+    return ["White Balance", "Exposure & Tone", "Film", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Lens", "Geometry", "Crop", "Effects", "View"]
 
 func opened() -> list[str]:
     return ["White Balance", "Exposure & Tone", "Color"]
@@ -36,9 +36,9 @@ func band_colors() -> list[str]:
 
 ## The track a parameter's slider shows, or "" for the plain one.
 func gradient_for(name: str) -> str:
-    if name == "temperature":
+    if name in ["temperature", "film_warmth"]:
         return "#4A7FD6|#F0F0F0|#E8A93C"
-    if name == "tint":
+    if name in ["tint", "film_tint"]:
         return "#3FA34A|#F0F0F0|#C24FBF"
     if name in ["exposure", "highlights", "shadows", "whites", "blacks", "levels_black", "levels_white", "levels_out_black", "levels_out_white", "grade_global_luminance", "grade_shadows_luminance", "grade_midtones_luminance", "grade_highlights_luminance"]:
         return "#161616|#E8E8E8"
@@ -54,7 +54,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -171,6 +171,10 @@ pub class DevelopControls:
             specs.append(ParameterSpec(name = "crop_tool", label = "Crop", kind = ParameterKind.button, join = true))
             specs.append(ParameterSpec(name = "aspect", label = "Aspect", kind = ParameterKind.menu, resettable = false,
                                        items = "Free=0|Original=-1|1:1=1|4:5=0.8|5:4=1.25|3:2=1.5|2:3=0.6667|16:9=1.7778"))
+        if title == "Film":
+            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = "None=0|Kodak EXR 500T 5298=1"))
+            specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
+                                          items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
         if title == "View":
             specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
