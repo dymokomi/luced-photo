@@ -31,11 +31,11 @@ let label_width: float = 104.0
 
 ## The sections in the order they show, and those that start open.
 func section_order() -> list[str]:
-    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "View", "Vignette", "Geometry", "Crop"]
+    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Print", "View", "Vignette", "Geometry", "Crop"]
 
 ## A stage with one section shows it open; the Grade's start with Tone and Color.
 func opened() -> list[str]:
-    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Color", "View", "Vignette", "Geometry", "Crop"]
+    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Color", "Print", "View", "Vignette", "Geometry", "Crop"]
 
 ## The Color Mixer's bands, as the parameter names spell them, and their chips' colors.
 func bands() -> list[str]:
@@ -52,6 +52,13 @@ func gradient_for(name: str) -> str:
         return "#3FA34A|#F0F0F0|#C24FBF"
     if name in ["exposure", "highlights", "shadows", "whites", "blacks", "levels_black", "levels_white", "levels_out_black", "levels_out_white", "grade_global_luminance", "grade_shadows_luminance", "grade_midtones_luminance", "grade_highlights_luminance"]:
         return "#161616|#E8E8E8"
+    # Printer lights: more of a color's light prints its complement.
+    if name == "print_red":
+        return "#D23C3C|#F0F0F0|#3FBFBF"
+    if name == "print_green":
+        return "#3FA34A|#F0F0F0|#C24FBF"
+    if name == "print_blue":
+        return "#3B6FD8|#F0F0F0|#E3C93A"
     if name in ["saturation", "vibrance"]:
         return "#808080|#D9534F|#E3C93A|#4CAF50|#3B6FD8"
     if name.starts_with("bw_") and name != "bw_tint_hue" and name != "bw_tint_amount":
