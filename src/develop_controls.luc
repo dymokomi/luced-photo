@@ -72,7 +72,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -222,6 +222,13 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35 mm Academy=0|Super 35=1|16 mm=2|Super 16=4|65 mm 5-perf=3|IMAX 15/70=5"))
+        if title == "Lens":
+            specs.insert(1, ParameterSpec(name = "lens_coating", label = "Coating", kind = ParameterKind.menu,
+                                          items = "Multi-coated=0|Single-coated=1|Uncoated=2",
+                                          doc = "Veiling glare beyond a modern lens's: older coatings scatter more light over the frame"))
+            specs.insert(2, ParameterSpec(name = "lens_diffusion", label = "Diffusion", kind = ParameterKind.menu,
+                                          items = "None=0|Low Contrast ½=1|Low Contrast 1=2|Low Contrast 2=3|Low Contrast 3=4|Low Contrast 4=5|Low Contrast 5=6",
+                                          doc = "A Tiffen Low Contrast filter: light from the frame laid over the shadows"))
         if title == "Scan":
             specs.insert(1, ParameterSpec(name = "scan_calibration", label = "Calibration", kind = ParameterKind.menu,
                                           items = "Reference (Vision3 250D)=0|Matched to the stock=1",
