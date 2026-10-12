@@ -132,6 +132,7 @@ pub class DevelopControls:
     var connections: list[Connection] = []
     ## The photo's as-shot white balance, which temperature 0 means.
     var shot_temperature: float = 5500.0
+    var shot_seconds: float = 0.0
     var shot_tint: float = 0.0
     var showing: bool = false
     ## Whether the guide tool and the crop tool are on.
@@ -450,10 +451,12 @@ pub class DevelopControls:
         self.look.load(text)
         self.show_values()
 
-    ## The photo's as-shot white balance, known once its develop has loaded.
-    pub func set_shot(self, shot_temperature: float, shot_tint: float) -> unit!:
+    ## The photo's as-shot white balance and shutter time (seconds, zero when
+    ## unknown), known once its develop has loaded.
+    pub func set_shot(self, shot_temperature: float, shot_tint: float, shot_seconds: float = 0.0) -> unit!:
         self.shot_temperature = shot_temperature
         self.shot_tint = shot_tint
+        self.shot_seconds = shot_seconds
         self.show_values()
 
     ## Put the look's values on every control.
@@ -466,6 +469,11 @@ pub class DevelopControls:
                 var value = self.look.get(name)
                 # The white balance's default is the camera's: it shows as shot,
                 # unmarked, until moved.
+                # The shutter, likewise: the camera's until moved.
+                if name == "exposure_time" and self.shot_seconds > 0.0:
+                    section.panel.set_default(index, 0, self.shot_seconds)
+                    if value == 0.0:
+                        value = self.shot_seconds
                 if name == "temperature":
                     section.panel.set_default(index, 0, self.shot_temperature)
                     if value == 0.0:

@@ -107,8 +107,8 @@ pub class Panels:
                 geometry.solve_look(controls.look, float(self.viewer.photo_width()), float(self.viewer.photo_height()))
             controls.show_values()
             self.session.changed()
-        self.viewer.on_developed = func (temperature: float, tint: float) -> unit!:
-            self.properties.develop.set_shot(temperature, tint)
+        self.viewer.on_developed = func (temperature: float, tint: float, seconds: float) -> unit!:
+            self.properties.develop.set_shot(temperature, tint, seconds)
             self.session.histogram_due = 2
         self.bind_actions()
         let actions = self.actions

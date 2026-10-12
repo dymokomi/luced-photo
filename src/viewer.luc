@@ -45,8 +45,9 @@ pub class Viewer: Widget:
     ## The photo shown, and the one on its way (ids; -1 for none).
     var shown: int = -1
     var wanted: int = -1
-    ## Called when a photo's develop is ready, with its as-shot white balance.
-    pub var on_developed: func(float, float) -> unit!? = none
+    ## Called when a photo's develop is ready, with its as-shot white balance
+    ## and shutter time.
+    pub var on_developed: func(float, float, float) -> unit!? = none
     ## The guide tool: whether it is on, the guides (x1, y1, x2, y2 each, 0..1 of
     ## the photo), the end being dragged (its x's index in `guides`, or -1), and
     ## where the photo was last drawn.
@@ -220,7 +221,7 @@ pub class Viewer: Widget:
             self.box.invalidate()
         if self.developer.poll():
             if let tell = self.on_developed:
-                tell(self.developer.shot_temperature(), self.developer.shot_tint())
+                tell(self.developer.shot_temperature(), self.developer.shot_tint(), self.developer.shot_seconds())
             self.box.invalidate()
 
     pub func layout(self) -> Layout:
