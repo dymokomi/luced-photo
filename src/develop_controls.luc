@@ -55,7 +55,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -179,6 +179,11 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|")))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
                                           items = "35mm Academy=0|Super 35=1|16mm=2|65mm=3"))
+            # Matched balances the light to the stock as White Balance does; with
+            # None or 85, White Balance is the light on set and the film sees it.
+            specs.insert(3, ParameterSpec(name = "film_filter", label = "Filter", kind = ParameterKind.menu,
+                                          items = "Matched=0|None=1|85 (daylight)=2",
+                                          doc = "Matched: balanced to the stock. None or 85: White Balance is the light on set, as the film saw it"))
         if title == "View":
             specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2|Kodak 2383 Print=3"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
