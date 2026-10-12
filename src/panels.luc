@@ -390,11 +390,6 @@ pub class Panels:
 
     # mark: the develop =========================================================================
 
-    ## Develop the shown photo with the settings `text`, as if the user set them.
-    pub func apply_develop(self, text: str) -> unit!:
-        self.properties.develop.show(text, 5500.0, 0.0)
-        self.session.changed()
-
     ## Move the lead `direction` photos on, selecting it alone.
     func step(self, direction: int) -> unit!:
         let grid = self.library_pane.grid

@@ -94,10 +94,6 @@ pub class PhotoLibrary:
             return []
         return text.lines()
 
-    pub func cancel_import(self):
-        if let current = self.running:
-            current.cancel()
-
     # mark: files ===============================================================================
 
     ## The grid thumbnail and the viewer preview of photo `id`.

@@ -596,18 +596,6 @@ pub class DevelopControls:
         self.curves.set_points(xs, ys)
         self.showing = was
 
-    ## Open or close every section.
-    pub func set_all_open(self, open: bool) -> unit!:
-        for section in self.sections:
-            section.panel.set_folder_open(section.title, open)
-        self.tick()
-
-    ## Open only the sections named in `titles`.
-    pub func open_only(self, titles: list[str]) -> unit!:
-        for section in self.sections:
-            section.panel.set_folder_open(section.title, section.title in titles)
-        self.tick()
-
     ## Show each section's widget while its folder is open; called on the window's timer.
     pub func tick(self):
         for section in self.sections:
