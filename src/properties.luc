@@ -1,11 +1,14 @@
-## The Properties pane: one long column about the selected photo: its develop
-## (develop_controls.luc), what the camera recorded, and its marks (stars, flag,
-## label). Marks act on the whole selection; the develop on the lead photo.
+## The Properties pane: one column about the selected photo. In Library mode
+## what the camera recorded and its marks (stars, flag, label: on the whole
+## selection); in the other modes the mode's develop controls
+## (develop_controls.luc) on the lead photo. The histogram and the photo's name
+## head both.
 from luce_ui.ui import VStack, HStack, Text, Button, Font, Panel, Size, ScrollView, Spacer, Rule, Command, Widget, Histogram
 from interop import Connection
 from photo_library import PhotoLibrary
 from actions import Actions
 from develop_controls import DevelopControls
+import modes
 
 pub class PropertiesPane:
     pub let panel: Panel
@@ -22,6 +25,11 @@ pub class PropertiesPane:
     let unselected: Text
     ## The ratings, flags and labels, shown with a photo to give them to.
     let marking: VStack
+    ## The camera's facts, shown in Library mode.
+    let facts: VStack
+    ## The mode shown (modes.luc).
+    var mode: int = 0
+    var selected_photo: bool = false
     var connections: list[Connection] = []
 
     pub func init(self, photos: PhotoLibrary, actions: Actions, font: Font) -> unit!:
@@ -46,8 +54,8 @@ pub class PropertiesPane:
         # What the photo is, right under its name: camera and lens, exposure, when, file.
         self.marking = VStack([Rule(), Text("MARKS", font = font, muted = true), self.marks, HStack(stars, spacing = 4.0), flags,
                                HStack(labels, spacing = 4.0)], spacing = 6.0)
-        let rows = VStack([self.histogram, self.title, self.camera, self.exposure, self.captured, self.file, Rule(),
-                           self.unselected, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 6.0)
+        self.facts = VStack([self.camera, self.exposure, self.captured, self.file, Rule()], spacing = 6.0)
+        let rows = VStack([self.histogram, self.title, self.facts, self.unselected, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 6.0)
         self.panel = Panel("Properties", ScrollView(rows), minimum = Size(260.0, 200.0), closable = false, id = "properties")
         self.show(-1, 0)
 
@@ -67,12 +75,8 @@ pub class PropertiesPane:
     ## photos are selected.
     pub func show(self, at: int, selected: int) -> unit!:
         let chosen = at >= 0
-        self.unselected.layout().set_visible(not chosen)
-        self.develop.body.layout().set_visible(chosen)
-        self.marking.layout().set_visible(chosen)
-        self.histogram.layout().set_visible(chosen)
-        for line in [self.camera, self.exposure, self.captured, self.file]:
-            line.layout().set_visible(chosen)
+        self.selected_photo = chosen
+        self.show_parts()
         if not chosen:
             self.title.set_text("No photo selected")
             self.marks.set_text("")
@@ -97,6 +101,23 @@ pub class PropertiesPane:
         let flag = ["Rejected", "", "Picked"][index.flag(at) + 1]
         let stars = "★".repeat(index.rating(at)) if index.rating(at) > 0 else "No rating"
         self.marks.set_text(f"{stars}  {flag}".trim())
+
+    ## Show mode `mode`'s parts: the facts and marks in Library, the mode's
+    ## controls in the others.
+    pub func set_mode(self, mode: int) -> unit!:
+        self.mode = mode
+        if mode != modes.library:
+            self.develop.show_mode(mode)
+        self.show_parts()
+
+    func show_parts(self) -> unit!:
+        let chosen = self.selected_photo
+        let library = self.mode == modes.library
+        self.unselected.layout().set_visible(not chosen)
+        self.develop.body.layout().set_visible(chosen and not library)
+        self.marking.layout().set_visible(chosen and library)
+        self.facts.layout().set_visible(chosen and library)
+        self.histogram.layout().set_visible(chosen)
 
     pub func close(self):
         self.develop.close()

@@ -1,0 +1,41 @@
+## The five modes on a fresh library in HOME: each shows its stages' sections
+## in Properties (Capture the camera and the film, Develop the chemistry, Print
+## the Output and its stages, View the display and the frame); the Output menu
+## swaps Print's stages; a switched-off Lens still shows, to switch on; the
+## window draws in every mode. Prints PASS or traps.
+from app import LucedPhoto
+from luce_std import files, paths
+import modes
+
+func expect(condition: bool, what: str) -> unit!:
+    if not condition:
+        print(f"FAIL modes: {what}")
+        trap(what)
+
+pub func main(arguments: list[str]) -> int!:
+    let photo = LucedPhoto(paths.join(files.home_directory(), "Modes.library"))
+    let panels = photo.panels
+    let controls = panels.properties.develop
+    expect(panels.mode == modes.library, "the app opens in Library")
+    panels.set_mode(modes.capture)
+    expect(controls.section_shown("Film") and controls.section_shown("Exposure"), "Capture shows the film and the exposure")
+    expect(controls.section_shown("Lens") and not controls.look.has_stage(3), "Capture shows the Lens, switched off")
+    expect(not controls.section_shown("Develop") and not controls.section_shown("Output"), "Capture shows no chemistry and no output")
+    panels.set_mode(modes.develop)
+    expect(controls.section_shown("Develop") and not controls.section_shown("Film"), "Develop shows the chemistry alone")
+    panels.set_mode(modes.printing)
+    expect(controls.section_shown("Output") and controls.section_shown("Scan") and controls.section_shown("Tone"), "Print shows the telecine")
+    expect(not controls.section_shown("Print"), "a telecine has no release print")
+    controls.look.set_output(1)
+    controls.show_values()
+    expect(controls.section_shown("Print") and not controls.section_shown("Scan"), "a release print swaps the stages")
+    panels.set_mode(modes.viewing)
+    expect(controls.section_shown("Crop") and not controls.section_shown("View"), "View frames a print; no display rendering for it")
+    controls.look.set_stage_used(3, true)
+    expect(controls.look.has_stage(3) and controls.look.output() == 1, "switching the Lens on keeps the output")
+    for mode in 0..<modes.count:
+        panels.set_mode(mode)
+        photo.run(["luced-photo", "--smoke"])
+    photo.close()
+    print("PASS modes: each mode shows its stages; outputs and switches change them; every mode draws")
+    return 0

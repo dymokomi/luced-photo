@@ -35,15 +35,18 @@ pub func text() -> Color:
 pub func text_muted() -> Color:
     return grey(140.0)
 
-pub func editor_theme() -> Theme!:
+## The window's theme, its accent `tint` (the mode's color; luced-2d's orange
+## by default).
+pub func editor_theme(wanted: Color? = none) -> Theme!:
+    let tint = wanted else accent()
     var theme = Theme()
     theme.background = backdrop()
     theme.panel = surface()
     theme.gutter = tab_strip()
     theme.foreground = text()
     theme.muted = text_muted()
-    theme.selection = accent()
-    theme.accent = accent()
+    theme.selection = tint
+    theme.accent = tint
     theme.button = grey(41.0)
     theme.button_hover = grey(58.0)
     theme.pressed = grey(72.0)
@@ -53,7 +56,7 @@ pub func editor_theme() -> Theme!:
     theme.sunken = grey(41.0)
     theme.raised = surface_raised()
     theme.accent_text = grey(0.0)
-    theme.menu_selection = accent()
+    theme.menu_selection = tint
     theme.border = border()
     theme.active_border = grey(150.0)
     theme.shadow_offset = 0.0

@@ -11,8 +11,12 @@
 ## picks the band, its hue, saturation and luminance show on three sliders.
 ##
 ## Each section belongs to a stage of the photo's recipe (luce-develop's
-## recipe.lucb), and only the stage picked in the Recipe pane shows, its
-## sections under its name: every control lives in a stage of the process.
+## recipe.lucb), each stage to one of the app's modes (modes.luc), and a mode
+## shows its stages' sections: Capture the camera's and the film's, Develop the
+## chemistry, Print the Output it goes to (a telecine, a release print, a
+## slide, paper) and that output's stages, View the display rendering and the
+## frame. White Balance, Lens and Filter have an On switch: off, the light
+## passes them by.
 ##
 ## The controls edit a Look (luce-develop's settings) and call `on_change` after
 ## every edit; `show` loads a photo's settings without calling it.
@@ -26,17 +30,18 @@ from luce_develop import recipe
 from luce_develop import looks
 from luce_std import math
 import essays
+import modes
 
 ## The label column every section shares, so all the sliders line up.
 let label_width: float = 104.0
 
 ## The sections in the order they show, and those that start open.
 func section_order() -> list[str]:
-    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Print", "Paper", "View", "Vignette", "Geometry", "Crop"]
+    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Output", "Scan", "Tone", "Levels", "Curves", "Color", "Color Mixer", "Color Grading", "Black & White", "Print", "Paper", "View", "Vignette", "Geometry", "Crop"]
 
 ## A stage with one section shows it open; the Grade's start with Tone and Color.
 func opened() -> list[str]:
-    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone", "Color", "Print", "Paper", "View", "Vignette", "Geometry", "Crop"]
+    return ["White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Output", "Scan", "Tone", "Color", "Print", "Paper", "View", "Vignette", "Geometry", "Crop"]
 
 ## The Color Mixer's bands, as the parameter names spell them, and their chips' colors.
 func bands() -> list[str]:
@@ -108,7 +113,8 @@ class Section:
             names.append(spec.name)
         self.names = names
         self.extra = extra
-        self.stage = recipe.owner_of(title)
+        # The Output menu belongs to the Print mode, not to a stage.
+        self.stage = output_section if title == "Output" else recipe.owner_of(title)
 
     ## Row `name`'s index, or -1.
     pub func row(self, name: str) -> int:
@@ -116,6 +122,13 @@ class Section:
 
     pub func is_open(self) -> bool:
         return self.panel.folder_open(self.title)
+
+## The Output section's stage number: none of the recipe's.
+let output_section: int = -2
+
+## The stages a switch takes in and out of the recipe.
+func optional(stage: int) -> bool:
+    return recipe.stage_key(stage) in ["white_balance", "lens", "filter"] if stage >= 0 else false
 
 pub class DevelopControls:
     pub let body: VStack
@@ -147,9 +160,8 @@ pub class DevelopControls:
     pub var on_crop_aspect: func(float) -> unit!? = none
     ## Called after the controls show other settings (another photo, undo).
     pub var on_shown: func() -> unit!? = none
-    ## The picked stage (-1 none), named over its sections.
-    var stage: int = -1
-    let stage_title: Text
+    ## The mode whose sections show (modes.luc).
+    var mode: int = 1
     ## Under the stage's sections: an essay about the stage, then one about
     ## what is chosen in it (the stock, the process), each under its title.
     let about: VStack
@@ -163,8 +175,7 @@ pub class DevelopControls:
         self.curves = CurveEditor()
         self.curves.layout().set_limits(Size(200.0, 200.0), Size(320.0, 320.0))
         self.wheels = []
-        self.stage_title = Text("", font = font)
-        var widgets: list[Widget] = [self.stage_title]
+        var widgets: list[Widget] = []
         for title in section_order():
             let section = Section(title, self.specs_for(title), self.extra_for(title, font), font)
             self.watch(section)
@@ -213,6 +224,16 @@ pub class DevelopControls:
                                        decimals = settings.decimals_of(at), slider = true, gradient = gradient_for(name)))
         if title == "White Balance":
             specs.append(ParameterSpec(name = "as_shot", label = "As Shot", kind = ParameterKind.button))
+        if title in ["White Balance", "Lens", "Filter"]:
+            specs.insert(1, ParameterSpec(name = "stage_on", label = "On", kind = ParameterKind.toggle, resettable = false,
+                                          doc = f"Off, the light passes the {title.lower()} by"))
+        if title == "Output":
+            var outputs: list[str] = []
+            for at in 0..<recipe.output_total():
+                outputs.append(f"{recipe.output_name(at)}={at}")
+            specs.append(ParameterSpec(name = "output", label = "Output", kind = ParameterKind.menu, items = outputs.join("|"), resettable = false,
+                                       doc = "What the developed film goes to: a telecine, a release print projected, a slide on a lightbox, paper, or a digital intermediate"))
+            return specs
         if title == "Black & White":
             specs.insert(1, ParameterSpec(name = "bw", label = "Black & White", kind = ParameterKind.toggle))
         if title == "Geometry":
@@ -340,6 +361,16 @@ pub class DevelopControls:
         if name == "aspect":
             if let tell = self.on_crop_aspect:
                 tell(value)
+            return
+        if name == "stage_on":
+            self.look.set_stage_used(section.stage, value > 0.5)
+            self.show_values()
+            self.changed()
+            return
+        if name == "output":
+            self.look.set_output(int(value))
+            self.show_values()
+            self.changed()
             return
         if name.starts_with("mixer_"):
             self.look.set(f"{bands()[self.band]}_{name[6..]}", value)
@@ -475,6 +506,12 @@ pub class DevelopControls:
             for (index, name) in section.names.indexed():
                 if name == section.title or name == "band" or name.starts_with("mixer_") or name in ["as_shot", "draw_guides", "clear_guides", "reset", "crop_tool", "aspect"]:
                     continue
+                if name == "stage_on":
+                    section.panel.set_value(index, 1.0 if self.look.has_stage(section.stage) else 0.0)
+                    continue
+                if name == "output":
+                    section.panel.set_value(index, float(self.look.output()))
+                    continue
                 var value = self.look.get(name)
                 # The white balance's default is the camera's: it shows as shot,
                 # unmarked, until moved.
@@ -516,29 +553,44 @@ pub class DevelopControls:
             self.wheels[at].set_hsb(self.look.get(f"grade_{range}_hue"), self.look.get(f"grade_{range}_saturation") / 100.0, 1.0)
         self.showing = false
         self.show_curve()
-        self.show_stage(self.stage)
+        self.show_mode(self.mode)
         if let tell = self.on_shown:
             tell()
 
-    ## Show stage `stage`'s sections under its name; with -1, or a stage the
-    ## recipe lacks, none.
-    pub func show_stage(self, stage: int) -> unit!:
-        self.stage = stage
-        let picked = stage >= 0 and self.look.has_stage(stage)
-        if not picked:
-            self.stage_title.set_text("Pick a stage in the Recipe to change it.")
-        else:
-            var state = ""
-            if self.look.stage_bypassed(stage):
-                state = "  ·  bypassed"
-            elif not self.look.stage_active(stage):
-                state = "  ·  not on the displayed path"
-            self.stage_title.set_text(recipe.stage_name(stage).upper() + state)
-        self.show_essays(stage if picked else -1)
+    ## Show mode `mode`'s sections (modes.luc): its stages' that the recipe
+    ## has, and its optional ones (switched off, their rows greyed); Print's
+    ## Output first. The Library mode shows none.
+    pub func show_mode(self, mode: int) -> unit!:
+        self.mode = mode
         for section in self.sections:
-            section.shown = picked and section.stage == stage
-            section.panel.layout().set_visible(section.shown)
+            var shown = false
+            if section.stage == output_section:
+                shown = mode == modes.printing
+            elif section.stage >= 0 and modes.of_stage(section.stage) == mode:
+                shown = self.look.has_stage(section.stage) or optional(section.stage)
+            section.shown = shown
+            section.panel.layout().set_visible(shown)
+            if shown and optional(section.stage):
+                let on = self.look.has_stage(section.stage)
+                for (index, name) in section.names.indexed():
+                    if name != section.title and name != "stage_on":
+                        section.panel.set_enabled(index, on)
+        self.show_essays(self.subject(mode))
         self.tick()
+
+    ## The stage a mode's essays are about: the film, its development, what
+    ## the output does with it; none for Library and View.
+    func subject(self, mode: int) -> int:
+        if mode == modes.capture:
+            return 5
+        if mode == modes.develop:
+            return 6
+        if mode == modes.printing:
+            for key in ["paper", "lightbox", "print", "scan"]:
+                for stage in 0..<recipe.stage_total():
+                    if recipe.stage_key(stage) == key and self.look.has_stage(stage):
+                        return stage
+        return -1
 
     ## The essays about stage `stage` (-1: none) and what is chosen in it: the
     ## stock; the process, and bleach bypass for a color negative or

@@ -1,0 +1,114 @@
+## The app's five modes, a darkroom's rooms in the order a photo goes through
+## them: Library (the photos, presets and finished pictures), Capture (the
+## light and the film in the camera), Develop (the chemistry), Print (everything
+## after development: a telecine, a print, a slide, paper) and View (how it is
+## shown: the display rendering and the frame). Each has its color, which the
+## mode bar and the window's accent take: grey, blue, red, green, orange.
+## Each stage of the photo's recipe (luce-develop's recipe.lucb) belongs to one
+## mode, and Properties shows the sections of the mode's stages.
+from luce_ui.ui import Widget, Layout, Constraints, Size, Event, Painter, Font
+from luce_gpu.gpu import RenderTarget, Rect, Color
+from luce_window.input import EventKind, Cursor
+from luce_develop import recipe
+import theme
+
+pub let library: int = 0
+pub let capture: int = 1
+pub let develop: int = 2
+pub let printing: int = 3
+pub let viewing: int = 4
+pub let count: int = 5
+
+pub func name(mode: int) -> str:
+    return ["Library", "Capture", "Develop", "Print", "View"][mode]
+
+## The mode's color (sRGB): grey, blue, red, green, orange.
+pub func color(mode: int) -> Color:
+    return [theme.srgb(150.0, 150.0, 150.0), theme.srgb(74.0, 138.0, 226.0), theme.srgb(222.0, 76.0, 68.0),
+            theme.srgb(76.0, 178.0, 96.0), theme.srgb(231.0, 160.0, 63.0)][mode]
+
+## The mode a recipe stage belongs to: the camera's and the film's to Capture,
+## development to Develop, every stage after it to Print, the display
+## rendering and the frame to View.
+pub func of_stage(stage: int) -> int:
+    let key = recipe.stage_key(stage)
+    if key in ["file", "white_balance", "exposure", "lens", "filter", "film"]:
+        return capture
+    if key == "develop":
+        return develop
+    if key in ["view", "easel"]:
+        return viewing
+    return printing
+
+## The mode bar: the five modes across the top, the chosen one filled with its
+## color, the others named in theirs over a thin line of it.
+pub class ModeBar: Widget:
+    let box: Layout
+    let font: Font
+    pub var chosen: int = library
+    var hovered: int = -1
+    pub var on_pick: func(int) -> unit!? = none
+
+    pub func init(self, font: Font) -> unit!:
+        self.font = font
+        self.box = Layout()
+        self.box.set_interactive(true)
+        self.box.set_cursor(Cursor.pointer)
+
+    pub func layout(self) -> Layout:
+        return self.box
+    pub func measure(self, available: Constraints) -> Size!:
+        return Size(float(count) * segment_width, 30.0)
+
+    pub func choose(self, mode: int) -> unit!:
+        self.chosen = mode
+        self.box.invalidate()
+
+    pub func draw(self, target: RenderTarget) -> unit!:
+        let size = target.size()
+        let p = Painter(target)
+        let width = size.width / float(count)
+        for mode in 0..<count:
+            let x = float(mode) * width
+            let tint = color(mode)
+            let label = name(mode).upper()
+            let text_x = x + (width - self.font.measure(label)) * 0.5
+            let text_y = (size.height - self.font.line_height()) * 0.5
+            if mode == self.chosen:
+                p.rounded_rectangle(Rect(x + 2.0, 2.0, width - 4.0, size.height - 4.0), tint, 5.0)
+                p.text(label, text_x, text_y, theme.grey(16.0), self.font)
+            else:
+                if mode == self.hovered:
+                    p.rounded_rectangle(Rect(x + 2.0, 2.0, width - 4.0, size.height - 4.0), theme.grey(58.0), 5.0)
+                p.rectangle(Rect(x + 10.0, size.height - 4.0, width - 20.0, 2.0), tint, 0.8)
+                p.text(label, text_x, text_y, tint, self.font)
+        p.close()
+
+    func mode_at(self, x: float) -> int:
+        let width = self.box.bounds().width / float(count)
+        let at = int(x / width) if width > 0.0 else -1
+        return at if at >= 0 and at < count else -1
+
+    pub func event(self, event: Event) -> unit!:
+        if event.kind == EventKind.pointer_moved:
+            let over = self.mode_at(event.x) if event.inside else -1
+            if over != self.hovered:
+                self.hovered = over
+                self.box.invalidate()
+        elif event.kind == EventKind.pointer_left:
+            self.hovered = -1
+            self.box.invalidate()
+        elif event.kind == EventKind.pointer_down and event.inside:
+            let picked = self.mode_at(event.x)
+            if picked >= 0:
+                if let pick = self.on_pick:
+                    pick(picked)
+
+## Each mode's segment in the bar.
+let segment_width: float = 116.0
+
+test "every stage belongs to a mode, in the process's order":
+    for stage in 0..<recipe.stage_total():
+        let mode = of_stage(stage)
+        assert(mode >= capture and mode <= viewing)
+    assert(of_stage(5) == capture and of_stage(6) == develop and of_stage(9) == printing and of_stage(13) == viewing)
