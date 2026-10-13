@@ -84,7 +84,10 @@ pub class Panels:
         self.export_dialog.ask_target = func (name: str) -> str!:
             let app = self.app else return ""
             return app.save_file("Export to", name)
-        self.library_pane = LibraryPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
+        let shared = self.actions
+        self.library_pane = LibraryPane(self.library, font, [shared.import_folder, shared.import_photos],
+                                        [shared.copy_film, shared.paste_film, Command("", divider = true), shared.copy_settings, shared.paste_settings,
+                                         shared.sync_settings, Command("", divider = true), shared.reset_settings])
         self.folders = FoldersPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
         self.folders.on_status = self.tell
         self.folders.on_camera_import = self.import_camera
@@ -152,7 +155,8 @@ pub class Panels:
                               Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
                               Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.watch_development, actions.refine_grain], font = font),
-                              Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.sync_settings, actions.reset_settings], font = font),
+                              Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.copy_film, actions.paste_film,
+                                                    actions.sync_settings, actions.reset_settings], font = font),
                               Menu("Window", actions.modes + [Command("", divider = true), actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
         self.dock = DStack([self.viewer.panel], font = font)
         self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
@@ -204,6 +208,17 @@ pub class Panels:
         self.connections.append(actions.undo.on_trigger(self.session.undo))
         self.connections.append(actions.redo.on_trigger(self.session.redo))
         self.connections.append(actions.copy_settings.on_trigger(self.session.copy))
+        self.connections.append(actions.copy_film.on_trigger(func () -> unit!:
+            self.session.copy_film(self.library_pane.lead())))
+        self.connections.append(actions.paste_film.on_trigger(func () -> unit!:
+            let picked = self.library_pane.selection()
+            if self.session.paste_film(picked) > 0:
+                # The photos take the copied photo's preset mark, so the
+                # Presets pane and Properties name what they now have.
+                self.library.set_marks(picked, "preset", self.session.film_mark)
+                self.library_pane.refresh_badges(picked)
+                self.show_selection(self.library_pane.lead())
+            self.show_activity()))
         self.connections.append(actions.paste_settings.on_trigger(func () -> unit!:
             self.session.paste(self.library_pane.selection())))
         self.connections.append(actions.sync_settings.on_trigger(func () -> unit!:

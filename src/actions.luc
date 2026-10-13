@@ -32,6 +32,8 @@ pub class Actions:
     pub let redo: Command
     pub let copy_settings: Command
     pub let paste_settings: Command
+    pub let copy_film: Command
+    pub let paste_film: Command
     pub let sync_settings: Command
     pub let reset_settings: Command
     ## The modes (modes.luc), ⌘1 to ⌘5.
@@ -75,6 +77,8 @@ pub class Actions:
         self.redo = Command("Redo", Shortcut(Key.z, primary = true, shift = true), id = "redo")
         self.copy_settings = Command("Copy Settings", Shortcut(Key.c, primary = true, shift = true), id = "copy_settings")
         self.paste_settings = Command("Paste Settings", Shortcut(Key.v, primary = true, shift = true), id = "paste_settings")
+        self.copy_film = Command("Copy Film Preset", Shortcut(Key.c, primary = true, alt = true), id = "copy_film")
+        self.paste_film = Command("Paste Film Preset", Shortcut(Key.v, primary = true, alt = true), id = "paste_film")
         self.sync_settings = Command("Sync Settings to Selection", Shortcut(Key.s, primary = true, shift = true), id = "sync_settings")
         self.reset_settings = Command("Reset Settings", Shortcut(Key.r, primary = true, shift = true), id = "reset_settings")
         let mode_keys = [Key.digit_1, Key.digit_2, Key.digit_3, Key.digit_4, Key.digit_5]
@@ -88,7 +92,7 @@ pub class Actions:
         self.all = [self.new_library, self.open_library, self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
         self.all = self.all + [self.next, self.previous, self.zoom, self.watch_development, self.refine_grain, self.undo, self.redo, self.copy_settings, self.paste_settings,
-                               self.sync_settings, self.reset_settings] + self.modes + [self.palette, self.reset_layout, self.quit]
+                               self.copy_film, self.paste_film, self.sync_settings, self.reset_settings] + self.modes + [self.palette, self.reset_layout, self.quit]
 
     ## Enable the actions on photos when some are selected.
     pub func refresh(self, has_photo: bool) -> unit!:

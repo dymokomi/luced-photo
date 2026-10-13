@@ -40,6 +40,38 @@ func name_in(part: str) -> str:
     let parts = part.split("=")
     return parts[0]
 
+## The sections that are the photo's own, not its film: the light it was taken
+## in, how it was exposed, and its framing. A film preset carries the rest.
+func own_sections() -> list[str]:
+    return ["White Balance", "Exposure", "Geometry", "Crop"]
+
+## The curves' names in the text form (luce-develop's settings.curve_names).
+func curve_names() -> list[str]:
+    return ["curve_rgb", "curve_red", "curve_green", "curve_blue", "curve_luma"]
+
+## Settings `text`'s film preset: its recipe and every parameter of the stages
+## from the lens to the print and the grade, each named even at its default
+## (and its curves even when straight), so pasting it replaces another photo's
+## film whole while that photo keeps its own light and framing.
+func film_part(text: str) -> str!:
+    let look = settings.look(text)
+    var parts: list[str] = []
+    let own = own_sections()
+    for at in 0..<settings.parameter_total():
+        if not (settings.section_of(at) in own):
+            let name = settings.name_of(at)
+            parts.append(f"{name}={look.get(name)}")
+    var shaped: set[str] = {}
+    for part in parts_of(text, false):
+        if part.starts_with("curve_"):
+            parts.append(part)
+            shaped.insert(name_in(part))
+    for name in curve_names():
+        if not (name in shaped):
+            parts.append(f"{name}=0,0 1,1")
+    parts.append(look.recipe_text())
+    return parts.join(";")
+
 ## Recipe `recipe` stacked on settings `target`: the recipe's values replace
 ## the target's of those names, the target's others and its framing stay. In
 ## the text form's own order, so an unchanged photo compares equal.
@@ -74,6 +106,10 @@ pub class DevelopSession:
     var redo_steps: map[int, list[str]] = {}
     ## Copied settings, without framing.
     var copied: str? = none
+    ## The film preset copied (`copy_film`), and the photo's preset mark
+    ## (preset_marks.luc) the photos it is pasted on take.
+    var film_copied: str? = none
+    pub var film_mark: int = 0
     pub var on_status: func(str) -> unit!? = none
     ## Told after a photo is sent to be developed again (the window shows it busy).
     pub var on_requested: func() -> unit!? = none
@@ -253,6 +289,31 @@ pub class DevelopSession:
         let changed = self.give(positions, "")
         self.tell(f"Reset {changed} photo{"" if changed == 1 else "s"}.")
 
+    ## Copy the film preset of the photo at `at`: everything but its own light
+    ## and framing (`film_part`).
+    pub func copy_film(self, at: int) -> unit!:
+        self.flush()
+        let index = self.library.index
+        if at < 0 or at >= index.count():
+            self.tell("Select the photo whose film to copy.")
+            return
+        self.film_copied = film_part(index.settings(at))
+        self.film_mark = index.preset(at)
+        self.tell(f"Copied the film preset of {index.name(at)}.")
+
+    ## Stack the copied film preset on the photos at `positions`; how many changed.
+    pub func paste_film(self, positions: list[int]) -> int!:
+        if self.film_copied == none:
+            self.tell("Copy a film preset first: right-click a photo, Copy Film Preset.")
+            return 0
+        let text = self.film_copied else return 0
+        if positions.length == 0:
+            self.tell("Select photos to paste the film preset onto.")
+            return 0
+        let changed = self.give(positions, text, stack = true)
+        self.tell(f"Pasted the film preset onto {changed} photo{"" if changed == 1 else "s"}." if changed > 0 else "The film preset changes nothing here.")
+        return changed
+
     # mark: recipes ===========================================================================
 
     ## The developed photo's settings as a saved recipe holds them: without its
@@ -278,3 +339,12 @@ pub class DevelopSession:
     func tell(self, text: str) -> unit!:
         if let say = self.on_status:
             say(text)
+
+test "a pasted film preset replaces the film whole and keeps the photo's light and framing":
+    let copied = film_part("film_stock=1;film_grain=110;exposure=1;temperature=3200")
+    let pasted = stacked(copied, "film_stock=3;develop_time=4;temperature=4000;crop_left=0.1")
+    let look = settings.look(pasted)
+    assert(look.get("film_stock") == 1.0 and look.get("film_grain") == 110.0)
+    # The target's own development is gone, its light and framing stay.
+    assert(look.get("develop_time") == settings.look("").get("develop_time"))
+    assert(look.get("temperature") == 4000.0 and look.get("crop_left") == 0.1 and look.get("exposure") == 0.0)

@@ -10,7 +10,7 @@
 ## capture date or preset holds what is typed. An empty library says how to
 ## fill it, with the import commands at hand; a filter or search that hides
 ## every photo says so.
-from luce_ui.ui import Application, Notifier, ThumbnailGrid, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget
+from luce_ui.ui import Application, Notifier, ThumbnailGrid, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget, ContextMenu
 from properties import camera_name
 from interop import Connection
 from photo_library import PhotoLibrary
@@ -66,7 +66,9 @@ pub class LibraryPane:
     pub var on_pick: func(int) -> unit!? = none
     pub var on_open: func(int) -> unit!? = none
 
-    pub func init(self, photos: PhotoLibrary, font: Font, imports: list[Command]) -> unit!:
+    ## `imports` are the empty library's buttons; `photo_commands` the photos'
+    ## right-click menu (a right-click selects the photo under it first).
+    pub func init(self, photos: PhotoLibrary, font: Font, imports: list[Command], photo_commands: list[Command]) -> unit!:
         self.library = photos
         self.loader = thumbs.start(3, library.thumb_edge)
         self.grid = ThumbnailGrid(photos.index.count(), 160.0, font = font)
@@ -135,7 +137,10 @@ pub class LibraryPane:
             self.library.set_search(text)
             self.refresh()))
         self.search_row = HStack([self.search, HStack([self.grid_button, self.list_button], spacing = 0.0)], spacing = 6.0, padding = 4.0)
-        let content = VStack([self.search_row, self.empty, self.grid, self.list], spacing = 0.0)
+        let photos_box = VStack([self.grid, self.list], spacing = 0.0)
+        photos_box.layout().set_flex()
+        let photo_menu = ContextMenu(photos_box, photo_commands, font = font)
+        let content = VStack([self.search_row, self.empty, photo_menu], spacing = 0.0)
         content.layout().set_flex()
         self.panel = Panel("Photos", content, minimum = Size(240.0, 200.0), closable = false, footer = bar, id = "library")
         self.refresh()

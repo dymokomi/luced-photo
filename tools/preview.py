@@ -23,6 +23,7 @@ parser.add_argument("--export", default="", help="export the photo at --position
 parser.add_argument("--click", default="", help="left-click at window point X,Y (points) mid-run")
 parser.add_argument("--wheel", action="store_true", help="zoom the viewer with a mouse wheel, then pan with a middle drag")
 parser.add_argument("--switch", default="", help="open (making it) the library at this path mid-run")
+parser.add_argument("--film", action="store_true", help="give the photo film look 0, copy its film preset onto the first photo, open the photos' menu")
 parser.add_argument("--look", default="", help="give the photo film look N and capture T ticks (50 ms) later: N:T")
 parser.add_argument("--output", type=Path, default=ROOT / "build/preview.png")
 arguments = parser.parse_args()
@@ -46,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix="luced-photo-preview-") as temporary:
     environment = dict(os.environ, LUCE_CACHE=str(ROOT / "build/cache"))
     subprocess.run([os.environ.get("LUCE") or shutil.which("luce") or str(ROOT.parent / "luce/build/luce"), "build", str(project / "src/main.luc"), "--native", "-o", str(binary)], check=True, env=environment, timeout=600)
     ppm = project / "preview.ppm"
-    subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else (("zoom" if arguments.zoom else ("export" if arguments.export else ("undo" if arguments.undo else ("crop" if arguments.crop else ("presets" if arguments.presets else ("switch" if arguments.switch else ("wheel" if arguments.wheel else ("click" if arguments.click else ("look" if arguments.look else ""))))))))))] + ([str(Path(arguments.export).resolve())] if arguments.export else []) + ([str(Path(arguments.switch).resolve())] if arguments.switch else []) + ([arguments.click] if arguments.click else []) + ([arguments.look] if arguments.look else []), check=True, timeout=120)
+    subprocess.run([str(binary), str(ppm), str(arguments.library.resolve()), str(arguments.position), str(arguments.cell), arguments.develop, "guides" if arguments.guides else (("zoom" if arguments.zoom else ("export" if arguments.export else ("undo" if arguments.undo else ("crop" if arguments.crop else ("presets" if arguments.presets else ("switch" if arguments.switch else ("wheel" if arguments.wheel else ("click" if arguments.click else ("look" if arguments.look else ("film" if arguments.film else "")))))))))))] + ([str(Path(arguments.export).resolve())] if arguments.export else []) + ([str(Path(arguments.switch).resolve())] if arguments.switch else []) + ([arguments.click] if arguments.click else []) + ([arguments.look] if arguments.look else []), check=True, timeout=120)
     header, dimensions, maximum, pixels = ppm.read_bytes().split(b"\n", 3)
     width, height = map(int, dimensions.split())
     rows = b"".join(b"\0" + pixels[y * width * 3:(y + 1) * width * 3] for y in range(height))

@@ -33,6 +33,9 @@ pub func main(arguments: list[str]) -> int!:
     let looking = arguments.length > 6 and arguments[5] == "look"
     let look_at = int(arguments[6].split(":")[0]) if looking else 0
     let look_after = int(arguments[6].split(":")[1]) if looking else 0
+    # Film look 0 given to the photo, its film preset copied and pasted onto
+    # the first photo, then the photos' right-click menu opened over it.
+    let film_copying = arguments.length > 5 and arguments[5] == "film"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -78,6 +81,25 @@ pub func main(arguments: list[str]) -> int!:
         if ticks == 30 and looking:
             photo.panels.presets.apply(recipe.mode_total() + photo.panels.library.presets.count() + look_at)
         if looking and ticks == 30 + look_after and capture < 0:
+            capture = 0
+        if ticks == 30 and film_copying:
+            photo.panels.presets.apply(recipe.mode_total() + photo.panels.library.presets.count())
+        if ticks == 34 and film_copying:
+            photo.panels.actions.copy_film.trigger()
+            grid.select(0)
+            photo.panels.show_selection(0)
+            photo.panels.actions.paste_film.trigger()
+            let index = photo.panels.library.index
+            print(f"copied from: {index.settings(position)}")
+            print(f"pasted onto: {index.settings(0)}")
+        if ticks == 60 and film_copying:
+            let box = grid.layout().bounds()
+            let x = box.x + 40.0
+            let y = box.y + 40.0
+            photo.app.dispatch(Event(kind = EventKind.pointer_moved, x = x, y = y))
+            photo.app.dispatch(Event(kind = EventKind.pointer_down, button = 1, x = x, y = y))
+            photo.app.dispatch(Event(kind = EventKind.pointer_up, button = 1, x = x, y = y))
+        if film_copying and ticks == 64 and capture < 0:
             capture = 0
         if ticks == 30 and switching:
             photo.panels.open_library(arguments[6])
