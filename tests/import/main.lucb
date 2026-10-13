@@ -22,7 +22,7 @@ struct Counts:
     var skipped: i64
 
 func run_import(store: interop.Reference[prism.Store], root: str, sources: const str[]) -> Counts!:
-    let running = try importer.start(store, root, sources)
+    let running = try importer.start(store, root, sources, 0)
     defer running.release()
     let held = try running.get()
     var counts = Counts()

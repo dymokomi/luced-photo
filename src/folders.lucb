@@ -1,0 +1,211 @@
+## Library folders: how the photographer organizes the library, kept in the
+## catalog in an identity of their own:
+##
+##     /state    next       the id the next folder takes
+##     /f<id>    folder     id, name, parent (a folder's id, 0 at the top)
+##
+## A photo is in one folder at most (its catalog row's `folder`, 0 none);
+## folders hold folders. Luce reads them all into a FolderList, sorted by name
+## among their siblings, and writes one change at a time.
+import interop
+import memory
+from luce_prism import prism
+from luce_std.collections import TextPool, List, Buffer
+
+pub let folders_identity: str = "folders"
+
+## How long a commit waits for another writer of the identity.
+let wait_ms: i64 = 2000
+
+pub struct Folder:
+    pub var id: i64
+    pub var name: str
+    pub var parent: i64
+
+## Every folder, by name; text kept in `pool`.
+pub struct FolderList:
+    var folders: List[Folder]
+    var pool: TextPool
+    var next: i64
+
+    pub func count() -> i64:
+        return (i64)self.folders.length()
+
+    func folder(at: i64) -> Folder:
+        if at < 0 or at >= (i64)self.folders.length():
+            trap("no folder at that position")
+        return self.folders.at((usize)at)
+
+    pub func id(at: i64) -> i64:
+        return self.folder(at).id
+    pub func name(at: i64) -> str:
+        return self.folder(at).name
+    pub func parent(at: i64) -> i64:
+        return self.folder(at).parent
+
+    ## The position of folder `id`, or -1.
+    pub func position_of(id: i64) -> i64:
+        for (at, folder) in self.folders.view().indexed():
+            if folder.id == id:
+                return (i64)at
+        return -1
+
+    ## Whether folder `id` is `ancestor` or inside it, at any depth.
+    pub func within(id: i64, ancestor: i64) -> bool:
+        var at = id
+        var steps = 0
+        while at != 0 and steps <= (i64)self.folders.length():
+            if at == ancestor:
+                return true
+            let position = self.position_of(at)
+            if position < 0:
+                return false
+            at = self.folder(position).parent
+            steps += 1
+        return false
+
+    pub func close():
+        self.folders.destroy()
+        self.pool.destroy()
+
+pub let folder_list_type: interop.Type[FolderList] = interop.Type[FolderList]("FolderList", FolderList.close, closeable = true)
+
+## `a` against `b` as names are listed: ignoring ASCII case, then by bytes.
+func compare_names(a: str, b: str) -> i64:
+    let shorter = a.length if a.length < b.length else b.length
+    for at in 0..<shorter:
+        let x = lower(a.bytes[at])
+        let y = lower(b.bytes[at])
+        if x != y:
+            return -1 if x < y else 1
+    if a.length != b.length:
+        return -1 if a.length < b.length else 1
+    return 0
+
+func lower(byte: u8) -> u8:
+    return byte + 32 if byte >= 'A' and byte <= 'Z' else byte
+
+func collect(context: void*?, view: const prism.RowView*) -> !:
+    let into = (FolderList*)(context else error(prism.invalid, "no folders"))
+    let path = view.path()
+    if path == "/state":
+        into.next = view.integer("next") else into.next
+        return
+    if path.length < 3 or path.bytes[1] != 'f':
+        return
+    let id = view.integer("id") else return
+    let name = try into.pool.keep_text((view.text("name") else "").bytes)
+    try into.folders.append(Folder(id = id, name = name, parent = view.integer("parent") else 0))
+    if id >= into.next:
+        into.next = id + 1
+
+## Every folder in `store`, sorted by name.
+pub func read_folders(store: interop.Reference[prism.Store]) -> interop.Reference[FolderList]!:
+    var list = FolderList(next = 1)
+    errdefer list.close()
+    let held = try store.get()
+    if try held.mounted(folders_identity):
+        let snap = try held.snapshot_identity(folders_identity)
+        defer snap.release()
+        try (try snap.get()).each_child("/", collect, &list)
+    # Few folders: an insertion sort.
+    let items = list.folders.items()
+    for at in 1..<items.length:
+        let moving = items[at]
+        var to = at
+        while to > 0 and compare_names(items[to - 1].name, moving.name) > 0:
+            items[to] = items[to - 1]
+            to -= 1
+        items[to] = moving
+    let made = try new FolderList(folders = list.folders, pool = list.pool, next = list.next) in memory.heap
+    return try interop.Reference[FolderList].adopt(made, folder_list_type, memory.heap)
+
+## One session of writes to the folders identity.
+struct Writer:
+    var session: interop.Reference[prism.Session]
+    var path: Buffer
+
+    static func begin(store: prism.Store*) -> Writer!:
+        if not try store.mounted(folders_identity):
+            store.mount(folders_identity) catch failure:
+                if not try store.mounted(folders_identity):
+                    error(failure.code, failure.message)
+        return Writer(session = try store.begin_identity(folders_identity))
+
+    func at(id: i64) -> str!:
+        self.path.clear()
+        try self.path.put(b"/f")
+        try self.path.put_number(id)
+        return self.path.text()
+
+    func text(path: str, name: str, value: str) -> !:
+        let held = try prism.Value.text(value)
+        defer held.release()
+        try (try self.session.get()).set(path, name, held)
+
+    func integer(path: str, name: str, value: i64) -> !:
+        let held = try prism.Value.integer(value)
+        defer held.release()
+        try (try self.session.get()).set(path, name, held)
+
+    func commit() -> !:
+        _ = try (try self.session.get()).commit(wait_ms = wait_ms)
+
+    func close():
+        self.session.release()
+        self.path.destroy()
+
+## A new folder named `name` in folder `parent` (0: at the top); its id.
+pub func make_folder(store: interop.Reference[prism.Store], list: interop.Reference[FolderList], name: str, parent: i64) -> i64!:
+    let known = try list.get()
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let id = known.next
+    let path = try writer.at(id)
+    let session = try writer.session.get()
+    try session.add(path, "folder")
+    try writer.integer(path, "id", id)
+    try writer.text(path, "name", name)
+    try writer.integer(path, "parent", parent)
+    if not try session.contains("/state"):
+        try session.add("/state", "state")
+    try writer.integer("/state", "next", id + 1)
+    try writer.commit()
+    return id
+
+## Give folder `id` the name `name`.
+pub func rename_folder(store: interop.Reference[prism.Store], id: i64, name: str) -> !:
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let path = try writer.at(id)
+    let session = try writer.session.get()
+    if not try session.contains(path):
+        return
+    try writer.text(path, "name", name)
+    try writer.commit()
+
+## Put folder `id` into folder `parent` (0: at the top).
+pub func move_folder(store: interop.Reference[prism.Store], id: i64, parent: i64) -> !:
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let path = try writer.at(id)
+    let session = try writer.session.get()
+    if not try session.contains(path):
+        return
+    try writer.integer(path, "parent", parent)
+    try writer.commit()
+
+## Remove folder `id`; the caller moves what it held (photos, folders) first.
+pub func delete_folder(store: interop.Reference[prism.Store], id: i64) -> !:
+    var writer = try Writer.begin(try store.get())
+    defer writer.close()
+    let path = try writer.at(id)
+    let session = try writer.session.get()
+    if not try session.contains(path):
+        return
+    try session.remove(path)
+    try writer.commit()
+
+test "names sort ignoring case":
+    assert(compare_names("2026 Lisbon", "archive") < 0)
+    assert(compare_names("Family", "family") == 0)

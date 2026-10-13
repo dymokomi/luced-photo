@@ -11,6 +11,8 @@ from importer import Importer
 import importer
 from presets import PresetList
 import presets
+from folders import FolderList
+import folders
 
 ## An import was asked for while another runs.
 pub let busy = ErrorCode.package(20)
@@ -25,7 +27,12 @@ pub class PhotoLibrary:
     pub var index: PhotoIndex
     ## The develop presets, by name; read again after every change.
     pub var presets: PresetList
+    ## The library's folders; read again after every change.
+    pub var folders: FolderList
     var running: Importer? = none
+    ## The folder shown (0: every photo), and it with its subfolders' ids.
+    pub var folder: int = 0
+    var shown_folders: list[int] = []
     ## The filter the index applies (PhotoIndex.filter).
     var minimum_rating: int = 0
     var flags: int = 0
@@ -40,6 +47,8 @@ pub class PhotoLibrary:
         self.store = prism.Store.open(library.catalog_path(root))
         self.index = photo_index.read_index(self.store)
         self.presets = presets.read_presets(self.store)
+        self.folders = folders.read_folders(self.store)
+        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, [], [])
 
     ## Close this library and open the bundle at `root` in its place, made
     ## when it is missing; the filter stays. Not while an import runs.
@@ -54,13 +63,16 @@ pub class PhotoLibrary:
         self.store.close()
         self.store = store
         self.root = root
+        self.folders = folders.read_folders(self.store)
+        self.folder = 0
+        self.shown_folders = []
         self.reload()
         self.presets = presets.read_presets(self.store)
 
     ## Read the catalog again, keeping the filter.
     pub func reload(self) -> unit!:
         self.index = photo_index.read_index(self.store)
-        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets())
+        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets(), self.shown_folders)
 
     ## Show only photos with at least `minimum_rating` stars, flags `flags` (0
     ## all, 1 picked, -1 rejected, 2 all but rejected) and label `label` (0 any).
@@ -68,12 +80,12 @@ pub class PhotoLibrary:
         self.minimum_rating = minimum_rating
         self.flags = flags
         self.label = label
-        self.index.filter(minimum_rating, flags, label, self.search, self.searched_presets())
+        self.index.filter(minimum_rating, flags, label, self.search, self.searched_presets(), self.shown_folders)
 
     ## Show only photos matching `text` (search_field), as well as the filter.
     pub func set_search(self, text: str) -> unit!:
         self.search = text.trim()
-        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets())
+        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets(), self.shown_folders)
 
     ## The ids of the presets whose names hold the search.
     func searched_presets(self) -> list[int]:
@@ -88,13 +100,14 @@ pub class PhotoLibrary:
 
     # mark: importing ===========================================================================
 
-    ## Import the files and folders at `sources` on a thread of their own.
+    ## Import the files and folders at `sources` on a thread of their own, into
+    ## the folder shown (none when every photo shows).
     pub func start_import(self, sources: list[str]) -> unit!:
         if let current = self.running:
             if not current.finished():
                 error(busy, "an import is already running")
             current.close()
-        self.running = importer.start(self.store, self.root, sources)
+        self.running = importer.start(self.store, self.root, sources, self.folder)
 
     ## Whether an import is running.
     pub func importing(self) -> bool:
@@ -160,6 +173,8 @@ pub class PhotoLibrary:
                     self.index.set_flag(at, value)
                 "preset":
                     self.index.set_preset(at, value)
+                "folder":
+                    self.index.set_folder(at, value)
                 _:
                     self.index.set_label(at, value)
 
@@ -190,6 +205,74 @@ pub class PhotoLibrary:
     pub func delete_preset(self, id: int) -> unit!:
         presets.delete_preset(self.store, id)
         self.presets = presets.read_presets(self.store)
+
+    # mark: folders =============================================================================
+
+    ## Show folder `id`'s photos, its subfolders' with them (0: every photo).
+    pub func show_folder(self, id: int) -> unit!:
+        self.folder = id
+        self.shown_folders = self.tree_of(id) if id > 0 else []
+        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets(), self.shown_folders)
+
+    ## Folder `id` and every folder inside it.
+    pub func tree_of(self, id: int) -> list[int]:
+        var out = [id]
+        for at in 0..<self.folders.count():
+            let other = self.folders.id(at)
+            if other != id and self.folders.within(other, id):
+                out.append(other)
+        return out
+
+    ## How many photos folder `id` holds, its subfolders' with them (0: the library).
+    pub func count_in(self, id: int) -> int:
+        if id <= 0:
+            return self.index.total()
+        return self.index.count_in(self.tree_of(id))
+
+    ## A new folder named `name` in folder `parent` (0: at the top); its id.
+    pub func make_folder(self, name: str, parent: int) -> int!:
+        let id = folders.make_folder(self.store, self.folders, name, parent)
+        self.folders = folders.read_folders(self.store)
+        return id
+
+    pub func rename_folder(self, id: int, name: str) -> unit!:
+        folders.rename_folder(self.store, id, name)
+        self.folders = folders.read_folders(self.store)
+
+    ## Put folder `id` into `parent` (0: at the top), unless that is inside it.
+    pub func move_folder(self, id: int, parent: int) -> bool!:
+        if parent == id or (parent > 0 and self.folders.within(parent, id)):
+            return false
+        folders.move_folder(self.store, id, parent)
+        self.folders = folders.read_folders(self.store)
+        return true
+
+    ## Delete folder `id`: its photos and folders go to the folder it was in.
+    pub func delete_folder(self, id: int) -> unit!:
+        let at = self.folders.position_of(id)
+        if at < 0:
+            return
+        let parent = self.folders.parent(at)
+        var children: list[int] = []
+        for other in 0..<self.folders.count():
+            if self.folders.parent(other) == id:
+                children.append(self.folders.id(other))
+        for child in children:
+            folders.move_folder(self.store, child, parent)
+        # Its photos, every one in the catalog whatever the filter shows.
+        self.index.move_folder_photos(self.store, id, parent)
+        folders.delete_folder(self.store, id)
+        self.folders = folders.read_folders(self.store)
+        if self.folder == id:
+            self.folder = parent
+        self.reload()
+        self.show_folder(self.folder)
+
+    ## Move the photos at `positions` of the index into folder `id` (0: none).
+    pub func move_photos(self, positions: list[int], id: int) -> unit!:
+        self.set_marks(positions, "folder", id)
+        # Out of the folder shown: they leave the view.
+        self.show_folder(self.folder)
 
     pub func close(self):
         if let current = self.running:

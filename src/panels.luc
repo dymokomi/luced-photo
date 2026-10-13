@@ -7,7 +7,7 @@
 ## shows the lead one in the viewer and Properties; ratings, flags and labels
 ## act on the whole selection; an import's progress shows in the status line
 ## while the grid fills in.
-from luce_ui.ui import VStack, HStack, Text, Font, Button, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
+from luce_ui.ui import VStack, HStack, Text, Font, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
 from interop import Connection
 from actions import Actions, label_number
 from photo_library import PhotoLibrary
@@ -15,6 +15,7 @@ from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
 from presets_pane import PresetsPane
+from folders_pane import FoldersPane
 from modes import ModeBar
 import modes
 import theme
@@ -38,6 +39,8 @@ pub class Panels:
     pub let actions: Actions
     pub let library: PhotoLibrary
     pub let library_pane: LibraryPane
+    ## The folders, beside the photos in the Library mode.
+    pub let folders: FoldersPane
     pub let viewer: Viewer
     pub let properties: PropertiesPane
     pub let presets: PresetsPane
@@ -71,6 +74,16 @@ pub class Panels:
             let app = self.app else return ""
             return app.save_file("Export to", name)
         self.library_pane = LibraryPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
+        self.folders = FoldersPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
+        self.folders.on_status = self.tell
+        self.folders.on_pick = func (id: int) -> unit!:
+            self.library.show_folder(id)
+            self.library_pane.refresh()
+            self.library_pane.select(-1)
+            self.show_selection(-1)
+        self.folders.tree.on_drop = self.move_photos
+        self.folders.on_move_here = func (id: int) -> unit!:
+            self.move_photos(id, self.library_pane.selection())
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
         self.status = Text("", font = font, muted = true)
@@ -87,7 +100,7 @@ pub class Panels:
             # parameters the Library mode then shows.
             if picked.length > 0:
                 self.library.set_marks(picked, "preset", id)
-                self.properties.show(self.library_pane.grid.selected_index(), picked.length)
+                self.properties.show(self.library_pane.lead(), picked.length)
         self.mode_bar = ModeBar(font)
         self.mode_bar.on_pick = self.set_mode
         self.library_pane.on_pick = self.show_selection
@@ -119,7 +132,7 @@ pub class Panels:
             self.session.histogram_due = 2
         self.bind_actions()
         let actions = self.actions
-        let toolbar = HStack([Text("LUCED PHOTO", font = font), self.tool(font, "import", actions.import_folder), Spacer(), self.mode_bar, Spacer(),
+        let toolbar = HStack([Spacer(), self.mode_bar, Spacer(),
                               Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
                               Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.watch_development, actions.refine_grain], font = font),
@@ -136,12 +149,6 @@ pub class Panels:
         self.arrange(modes.library)
         self.greet()
 
-    func tool(self, font: Font, icon: str, command: Command) -> Button!:
-        let button = Button(icon = icon, font = font)
-        self.connections.append(button.on_click(func () -> unit!:
-            command.trigger()))
-        return button
-
     func bind_actions(self) -> unit!:
         let actions = self.actions
         self.connections.append(actions.new_library.on_trigger(self.choose_new_library))
@@ -150,8 +157,8 @@ pub class Panels:
         self.connections.append(actions.import_folder.on_trigger(self.choose_import_folder))
         self.connections.append(self.library_pane.grid.on_drop(self.import_dropped))
         self.connections.append(actions.select_all.on_trigger(func () -> unit!:
-            self.library_pane.grid.select_all()
-            self.show_selection(self.library_pane.grid.selected_index())))
+            self.library_pane.select_all()
+            self.show_selection(self.library_pane.lead())))
         self.connections.append(actions.bigger.on_trigger(func () -> unit!:
             self.library_pane.grid.set_cell_size(self.library_pane.grid.cell_size() * 1.25)))
         self.connections.append(actions.smaller.on_trigger(func () -> unit!:
@@ -206,6 +213,22 @@ pub class Panels:
             if let app = self.app:
                 app.stop()))
 
+    ## Move the photos at `picked` (Photos pane positions) into folder `id` (0: none).
+    func move_photos(self, id: int, picked: list[int]) -> unit!:
+        if picked.length == 0:
+            self.tell("Select photos to move.")
+            return
+        self.session.flush()
+        self.library.move_photos(picked, id)
+        self.library_pane.refresh()
+        self.folders.refresh()
+        # The photos moved may have left the view: nothing stays selected.
+        self.library_pane.select(-1)
+        self.show_selection(-1)
+        let at = self.library.folders.position_of(id)
+        let name = f"“{self.library.folders.name(at)}”" if at >= 0 else "no folder"
+        self.tell(f"Moved {picked.length} photo{"" if picked.length == 1 else "s"} to {name}.")
+
     # mark: modes ===============================================================================
 
     ## Go to mode `mode`: its panes, its controls, its color.
@@ -221,7 +244,7 @@ pub class Panels:
     func arrange(self, mode: int) -> unit!:
         self.mode = mode
         self.mode_bar.choose(mode)
-        for panel in [self.library_pane.panel, self.presets.panel]:
+        for panel in [self.library_pane.panel, self.presets.panel, self.folders.panel]:
             if self.dock.contains(panel):
                 self.dock.remove(panel)
         let was_strip = self.mode_before >= 0 and self.mode_before != modes.library
@@ -230,7 +253,9 @@ pub class Panels:
         self.mode_before = mode
         if mode == modes.library:
             self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.left)
-            self.dock.set_fraction(self.library_pane.panel, 0.36)
+            self.dock.set_fraction(self.library_pane.panel, 0.4)
+            self.dock.add(self.folders.panel, self.library_pane.panel, DockPosition.left)
+            self.dock.set_fraction(self.folders.panel, 0.32)
             self.dock.add(self.presets.panel, self.properties.panel, DockPosition.top)
             self.dock.set_fraction(self.presets.panel, 0.4)
         else:
@@ -281,6 +306,7 @@ pub class Panels:
         self.session.forget()
         self.unshown = -1
         self.library_pane.show_library()
+        self.folders.refresh()
         self.presets.show()
         self.show_selection(-1)
         self.show_library_title()
@@ -361,15 +387,16 @@ pub class Panels:
     ## Read the catalog again and show it, keeping the lead photo selected.
     func show_new_photos(self) -> unit!:
         self.unshown = -1
-        let grid = self.library_pane.grid
-        let lead = grid.selected_index()
+        let photos = self.library_pane
+        let lead = photos.lead()
         let lead_id = self.library.index.id(lead) if lead >= 0 else -1
         self.library.reload()
-        self.library_pane.refresh()
+        photos.refresh()
+        self.folders.refresh()
         if lead_id >= 0:
             let at = self.library.index.position_of(lead_id)
             if at >= 0:
-                grid.select(at)
+                photos.select(at)
 
     # mark: exporting ==========================================================================
 
@@ -413,7 +440,7 @@ pub class Panels:
     pub func show_selection(self, lead: int) -> unit!:
         self.properties.develop.set_guiding(false)
         self.properties.develop.set_cropping(false)
-        let selected = self.library_pane.grid.selected_count()
+        let selected = self.library_pane.selected_count()
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)
         if lead < 0:
@@ -442,10 +469,10 @@ pub class Panels:
 
     ## Select the photo at `position` alone and show it.
     pub func show_photo(self, position: int) -> unit!:
-        let grid = self.library_pane.grid
-        if position < 0 or position >= grid.item_count():
+        let photos = self.library_pane
+        if position < 0 or position >= photos.item_count():
             return
-        grid.select(position)
+        photos.select(position)
         self.show_selection(position)
 
     ## An Aspect menu value as width over height: -1 is the photo's own, 0 free.
@@ -459,14 +486,14 @@ pub class Panels:
 
     ## Move the lead `direction` photos on, selecting it alone.
     func step(self, direction: int) -> unit!:
-        let grid = self.library_pane.grid
-        let count = grid.item_count()
+        let photos = self.library_pane
+        let count = photos.item_count()
         if count == 0:
             return
-        let lead = grid.selected_index()
+        let lead = photos.lead()
         var target = lead + direction if lead >= 0 else 0
         target = 0 if target < 0 else (count - 1 if target >= count else target)
-        grid.select(target)
+        photos.select(target)
         self.show_selection(target)
 
     ## Set `name` to `value` on every selected photo.
@@ -476,7 +503,7 @@ pub class Panels:
             return
         self.library.set_marks(picked, name, value)
         self.library_pane.refresh_badges(picked)
-        self.properties.show(self.library_pane.grid.selected_index(), picked.length)
+        self.properties.show(self.library_pane.lead(), picked.length)
 
     # mark: the timer ===========================================================================
 
@@ -515,4 +542,5 @@ pub class Panels:
         self.viewer.close()
         self.properties.close()
         self.presets.close()
+        self.folders.close()
         self.library.close()

@@ -1,0 +1,150 @@
+## The Library pane: the library's folders (folder_tree.luc), All Photos
+## first, and the import. Picking a folder shows its photos (its subfolders'
+## with them) in the Photos pane; an import goes into the folder picked. Its
+## footer imports a folder or photos and makes a folder; a row's menu (right
+## click) makes a folder at the top or inside it, renames or deletes it (its
+## photos and folders go to the folder it was in), and moves the selected
+## photos into it.
+from luce_ui.ui import Widget, Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ContextMenu, Command, TextPrompt, ConfirmDialog, Font, ScrollView
+from interop import Connection
+from photo_library import PhotoLibrary
+from folder_tree import FolderTree
+
+pub class FoldersPane:
+    pub let panel: Panel
+    pub let tree: FolderTree
+    let library: PhotoLibrary
+    let font: Font
+    let menu: ContextMenu
+    let prompt: TextPrompt
+    let confirm: ConfirmDialog
+    let new_command: Command
+    let inside_command: Command
+    let rename_command: Command
+    let delete_command: Command
+    let move_command: Command
+    var connections: list[Connection] = []
+    ## The folder a menu or the prompt is about (-1 none), and what the prompt
+    ## asks: "new" a folder's name (inside `target`, 0 at the top), "rename".
+    var target: int = -1
+    var asking: str = ""
+    ## A folder was picked (0: All Photos).
+    pub var on_pick: func(int) -> unit!? = none
+    ## Move the selected photos into a folder.
+    pub var on_move_here: func(int) -> unit!? = none
+    pub var on_status: func(str) -> unit!? = none
+
+    pub func init(self, library: PhotoLibrary, font: Font, imports: list[Command]) -> unit!:
+        self.library = library
+        self.font = font
+        self.tree = FolderTree(library, font)
+        self.tree.on_pick = func (id: int) -> unit!:
+            if let pick = self.on_pick:
+                pick(id)
+        self.tree.on_rename = func (id: int) -> unit!:
+            self.target = id
+            self.rename()
+        self.tree.on_menu = func (id: int) -> unit!:
+            self.target = id
+        self.new_command = Command("New Folder…", id = "folder_new")
+        self.inside_command = Command("New Folder Inside…", id = "folder_inside")
+        self.rename_command = Command("Rename Folder…", id = "folder_rename")
+        self.delete_command = Command("Delete Folder…", id = "folder_delete")
+        self.move_command = Command("Move Selected Photos Here", id = "folder_move_here")
+        self.connections.append(self.new_command.on_trigger(func () -> unit!:
+            self.ask_new(0)))
+        self.connections.append(self.inside_command.on_trigger(func () -> unit!:
+            self.ask_new(self.target)))
+        self.connections.append(self.rename_command.on_trigger(self.rename))
+        self.connections.append(self.delete_command.on_trigger(self.ask_delete))
+        self.connections.append(self.move_command.on_trigger(func () -> unit!:
+            if let move = self.on_move_here:
+                move(self.target if self.target >= 0 else 0)))
+        self.menu = ContextMenu(ScrollView(self.tree), [self.new_command, self.inside_command, self.rename_command, Command("", divider = true),
+                                                        self.move_command, Command("", divider = true), self.delete_command], font = font)
+        self.connections.append(self.menu.on_open(self.fit_menu))
+        self.prompt = TextPrompt(font = font)
+        self.connections.append(self.prompt.on_submit(self.submitted))
+        self.confirm = ConfirmDialog(font = font)
+        self.connections.append(self.confirm.on_choose(self.chosen_delete))
+        let content = VStack([self.menu, self.prompt, self.confirm], spacing = 0.0)
+        content.layout().set_flex()
+        var buttons: list[Widget] = []
+        for (at, command) in imports.indexed():
+            buttons.append(self.shelf_button(["import", "open"][at] if at < 2 else "import", command))
+        let made = Button(icon = "folder-new", font = font)
+        made.set_style(ButtonStyle.plain)
+        self.connections.append(made.on_click(func () -> unit!:
+            self.ask_new(self.tree.picked)))
+        let shelf = Shelf(buttons + [made, Spacer()])
+        self.panel = Panel("Library", content, minimum = Size(170.0, 120.0), closable = false, footer = shelf, id = "folders")
+
+    func shelf_button(self, icon: str, command: Command) -> Button!:
+        let button = Button(icon = icon, font = self.font)
+        button.set_style(ButtonStyle.plain)
+        self.connections.append(button.on_click(func () -> unit!:
+            command.trigger()))
+        return button
+
+    func fit_menu(self) -> unit!:
+        let folder = self.target > 0
+        for command in [self.inside_command, self.rename_command, self.delete_command]:
+            command.set_enabled(folder)
+        self.move_command.set_enabled(self.target >= 0)
+
+    ## Read the folders again (the counts too).
+    pub func refresh(self) -> unit!:
+        self.tree.refresh()
+
+    func ask_new(self, parent: int) -> unit!:
+        self.asking = "new"
+        self.target = parent if parent > 0 else 0
+        let inside = self.library.folders.position_of(self.target)
+        let where = f" in “{self.library.folders.name(inside)}”" if inside >= 0 else ""
+        self.prompt.open(f"Name the new folder{where}", "Untitled", accept = "Make")
+
+    func rename(self) -> unit!:
+        let at = self.library.folders.position_of(self.target)
+        if at < 0:
+            return
+        self.asking = "rename"
+        self.prompt.open("Rename the folder", self.library.folders.name(at), accept = "Rename")
+
+    func submitted(self, typed: str) -> unit!:
+        let name = typed.trim()
+        let asking = self.asking
+        self.asking = ""
+        if name == "":
+            return
+        if asking == "new":
+            let id = self.library.make_folder(name, self.target)
+            self.tree.reveal(id)
+            self.tell(f"Made the folder “{name}”.")
+        elif asking == "rename":
+            self.library.rename_folder(self.target, name)
+            self.tree.refresh()
+
+    func ask_delete(self) -> unit!:
+        let at = self.library.folders.position_of(self.target)
+        if at < 0:
+            return
+        self.confirm.open(f"Delete the folder “{self.library.folders.name(at)}”? Its photos and folders go to the folder it is in; no photo is deleted.", "Delete", "")
+
+    func chosen_delete(self, role: int) -> unit!:
+        if role != 0 or self.target <= 0:
+            return
+        let picked = self.tree.picked
+        self.library.delete_folder(self.target)
+        self.tree.refresh()
+        if self.tree.picked != picked:
+            if let pick = self.on_pick:
+                pick(self.tree.picked)
+
+    func tell(self, text: str) -> unit!:
+        if let say = self.on_status:
+            say(text)
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()

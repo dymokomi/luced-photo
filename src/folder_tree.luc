@@ -1,0 +1,196 @@
+## The Library pane's tree: All Photos, then the library's folders, each under
+## the folder it is in, with how many photos it holds (its subfolders' with
+## them). A folder with folders inside has a disclosure triangle; a click on it
+## opens or closes the folder, a click on the row shows its photos, a double
+## click renames it, a right click asks for its menu. Photos dragged from the
+## Photos pane drop onto a folder to move there (onto All Photos: out of any
+## folder); the row under them is outlined, the folder shown refuses them.
+from luce_ui.ui import Widget, Layout, Constraints, Size, Event, Painter, Font
+from luce_gpu.gpu import RenderTarget, Rect
+from luce_window.input import EventKind
+from luce_std import clock
+from photo_library import PhotoLibrary
+import theme
+import modes
+
+let row_height: float = 24.0
+let indent: float = 14.0
+
+## A row as drawn: the folder's id (0: All Photos), its depth, whether it has
+## folders inside.
+struct Row:
+    var id: int
+    var depth: int
+    var parent: bool
+
+pub class FolderTree: Widget:
+    let box: Layout
+    let font: Font
+    let library: PhotoLibrary
+    var rows: list[Row] = []
+    ## Folders shown open.
+    var open: set[int] = {}
+    var hovered: int = -1
+    ## The last press, its time and row, for double clicks.
+    var pressed_at: float = 0.0
+    var pressed_row: int = -1
+    ## The folder shown (0: All Photos).
+    pub var picked: int = 0
+    pub var on_pick: func(int) -> unit!? = none
+    pub var on_rename: func(int) -> unit!? = none
+    ## A right click on a row (its folder) or below them (-1).
+    pub var on_menu: func(int) -> unit!? = none
+    ## Photos dropped on a folder: the folder (0: none) and the photos'
+    ## positions in the Photos pane.
+    pub var on_drop: func(int, list[int]) -> unit!? = none
+    ## The row photos would drop on (-1 none).
+    var dropping: int = -1
+
+    pub func init(self, library: PhotoLibrary, font: Font) -> unit!:
+        self.library = library
+        self.font = font
+        self.box = Layout()
+        self.box.set_interactive(true)
+        self.box.set_flex()
+        self.box.set_drag_target(["photos"], overlay = false)
+        self.refresh()
+
+    pub func layout(self) -> Layout:
+        return self.box
+    pub func measure(self, available: Constraints) -> Size!:
+        return Size(180.0, float(self.rows.length) * row_height + 8.0)
+
+    ## Read the folders again: the rows, in tree order.
+    pub func refresh(self) -> unit!:
+        self.rows = [Row(id = 0, depth = 0, parent = false)]
+        self.add_children(0, 0)
+        if self.library.folders.position_of(self.picked) < 0:
+            self.picked = 0
+        self.box.set_limits(Size(120.0, float(self.rows.length) * row_height + 8.0), Size(16384.0, 16384.0))
+        self.box.invalidate()
+
+    func add_children(self, parent: int, depth: int) -> unit!:
+        let folders = self.library.folders
+        for at in 0..<folders.count():
+            if folders.parent(at) != parent:
+                continue
+            let id = folders.id(at)
+            let has = self.has_children(id)
+            self.rows.append(Row(id = id, depth = depth, parent = has))
+            if has and id in self.open:
+                self.add_children(id, depth + 1)
+
+    func has_children(self, id: int) -> bool:
+        let folders = self.library.folders
+        for at in 0..<folders.count():
+            if folders.parent(at) == id:
+                return true
+        return false
+
+    ## Show folder `id` open, and every folder it is in.
+    pub func reveal(self, id: int) -> unit!:
+        let folders = self.library.folders
+        var at = folders.position_of(id)
+        while at >= 0:
+            let parent = folders.parent(at)
+            if parent == 0:
+                break
+            self.open.insert(parent)
+            at = folders.position_of(parent)
+        self.refresh()
+
+    pub func draw(self, target: RenderTarget) -> unit!:
+        let size = target.size()
+        let p = Painter(target)
+        let folders = self.library.folders
+        for (index, row) in self.rows.indexed():
+            let y = 4.0 + float(index) * row_height
+            if row.id == self.picked:
+                p.rounded_rectangle(Rect(2.0, y, size.width - 4.0, row_height - 2.0), modes.color(modes.library), 4.0)
+            elif index == self.hovered:
+                p.rounded_rectangle(Rect(2.0, y, size.width - 4.0, row_height - 2.0), theme.grey(60.0), 4.0)
+            if index == self.dropping:
+                # Outlined: where the dragged photos would go.
+                let edge = modes.color(modes.library)
+                p.rectangle(Rect(2.0, y, size.width - 4.0, 1.5), edge)
+                p.rectangle(Rect(2.0, y + row_height - 3.5, size.width - 4.0, 1.5), edge)
+                p.rectangle(Rect(2.0, y, 1.5, row_height - 2.0), edge)
+                p.rectangle(Rect(size.width - 3.5, y, 1.5, row_height - 2.0), edge)
+            let x = 8.0 + float(row.depth) * indent
+            let ink = theme.grey(16.0) if row.id == self.picked else theme.text()
+            if row.parent:
+                p.text("▾" if row.id in self.open else "▸", x, y + 3.0, ink, self.font)
+            let name = "All Photos" if row.id == 0 else folders.name(folders.position_of(row.id))
+            p.text(name, x + indent, y + 3.0, ink, self.font)
+            let count = f"{self.library.count_in(row.id)}"
+            p.text(count, size.width - 10.0 - self.font.measure(count), y + 3.0, theme.grey(40.0) if row.id == self.picked else theme.text_muted(), self.font)
+        p.close()
+
+    func row_at(self, y: float) -> int:
+        let at = int((y - 4.0) / row_height)
+        return at if y >= 4.0 and at >= 0 and at < self.rows.length else -1
+
+    pub func event(self, event: Event) -> unit!:
+        if event.kind == EventKind.drag_entered or event.kind == EventKind.drag_moved:
+            let at = self.row_at(event.y)
+            # The folder shown holds them already.
+            let takes = at >= 0 and self.rows[at].id != self.picked
+            self.box.set_drop_accepted(takes)
+            let over = at if takes else -1
+            if over != self.dropping:
+                self.dropping = over
+                self.box.invalidate()
+            return
+        if event.kind == EventKind.drag_left:
+            self.dropping = -1
+            self.box.invalidate()
+            return
+        if event.kind == EventKind.drop:
+            let at = self.row_at(event.y)
+            self.dropping = -1
+            self.box.invalidate()
+            if at < 0 or self.box.drag_kind() != "photos":
+                return
+            var positions: list[int] = []
+            for item in 0..<self.box.drag_count():
+                positions.append(self.box.drag_item(item))
+            if let dropped = self.on_drop:
+                dropped(self.rows[at].id, positions)
+            return
+        if event.kind == EventKind.pointer_moved:
+            let over = self.row_at(event.y) if event.inside else -1
+            if over != self.hovered:
+                self.hovered = over
+                self.box.invalidate()
+        elif event.kind == EventKind.pointer_left:
+            self.hovered = -1
+            self.box.invalidate()
+        elif event.kind == EventKind.pointer_down and event.inside:
+            let at = self.row_at(event.y)
+            if event.button == 1:
+                if let menu = self.on_menu:
+                    menu(self.rows[at].id if at >= 0 else -1)
+                return
+            if at < 0:
+                return
+            let row = self.rows[at]
+            let triangle = 8.0 + float(row.depth) * indent
+            if row.parent and event.x >= triangle - 4.0 and event.x < triangle + indent:
+                if row.id in self.open:
+                    _ = self.open.remove(row.id)
+                else:
+                    self.open.insert(row.id)
+                self.refresh()
+                return
+            let now = clock.timestamp()
+            let twice = now - self.pressed_at < 0.35 and at == self.pressed_row
+            self.pressed_at = 0.0 if twice else now
+            self.pressed_row = at
+            if twice and row.id > 0:
+                if let rename = self.on_rename:
+                    rename(row.id)
+                return
+            self.picked = row.id
+            self.box.invalidate()
+            if let pick = self.on_pick:
+                pick(row.id)

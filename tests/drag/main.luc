@@ -1,0 +1,79 @@
+## A photo dragged from the Photos pane onto a folder in the Library pane moves
+## there, through the window's own events (a press on the photo, a move, the
+## release over the folder's row); the folder the photos are shown from refuses
+## them. The photos are luce-raw's sample raws (skipped when they are not
+## there), imported into a fresh library in HOME. Prints PASS or traps.
+from app import LucedPhoto
+from luce_ui.ui import Event
+from luce_gpu.gpu import Frame
+from luce_window.input import EventKind
+from luce_window import window
+from luce_std import files, paths, clock
+from library_pane import list_row_height
+
+func expect(condition: bool, what: str) -> unit!:
+    if not condition:
+        print(f"FAIL drag: {what}")
+        trap(what)
+
+pub func main(arguments: list[str]) -> int!:
+    let samples = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf"]
+    for sample in samples:
+        if not files.exists(sample):
+            print("skip: no sample raws in ../luce-raw/build/samples (luce-raw/tests/run.py fetches them)")
+            return 0
+    let photo = LucedPhoto(paths.join(files.home_directory(), "Drag.library"))
+    let panels = photo.panels
+    let library = panels.library
+    let trips = library.make_folder("Trips", 0)
+    library.start_import(samples)
+    while library.importing():
+        clock.sleep(0.05)
+    _ = library.poll_import()
+    library.reload()
+    panels.library_pane.refresh()
+    panels.folders.refresh()
+    expect(library.index.count() == 2 and library.count_in(trips) == 0, "two photos, none in Trips")
+    let app = photo.app
+    let frame = Frame(window.Size(1500.0, 920.0, 1500.0, 920.0, 1.0))
+    app.layout(1500.0, 920.0)
+    app.render(frame.target())
+    let grid = panels.library_pane.grid.layout().bounds()
+    let tree = panels.folders.tree.layout().bounds()
+    # The first photo: select it, then press on it and drag.
+    let x = grid.x + 30.0
+    let y = grid.y + 30.0
+    app.dispatch(Event(kind = EventKind.pointer_down, x = x, y = y))
+    app.dispatch(Event(kind = EventKind.pointer_up, x = x, y = y))
+    expect(panels.library_pane.grid.selected_count() == 1, "a click selected the photo")
+    app.dispatch(Event(kind = EventKind.pointer_down, x = x, y = y))
+    app.dispatch(Event(kind = EventKind.pointer_moved, x = x + 12.0, y = y + 6.0))
+    # Trips is the row under All Photos.
+    let row_x = tree.x + 40.0
+    let row_y = tree.y + 4.0 + 24.0 * 1.5
+    app.dispatch(Event(kind = EventKind.pointer_moved, x = row_x, y = row_y))
+    app.dispatch(Event(kind = EventKind.pointer_up, x = row_x, y = row_y))
+    expect(library.count_in(trips) == 1, "the dragged photo moved into Trips")
+    # The list: a click on a row shows that photo; a row drags onto a folder too.
+    let home = library.make_folder("Home", 0)
+    panels.folders.refresh()
+    panels.library_pane.show_list(true)
+    app.layout(1500.0, 920.0)
+    app.render(frame.target())
+    let table = panels.library_pane.list.layout().bounds()
+    let list_x = table.x + 40.0
+    # The header, then the rows.
+    let first_row = table.y + list_row_height * 1.5
+    app.dispatch(Event(kind = EventKind.pointer_down, x = list_x, y = first_row))
+    app.dispatch(Event(kind = EventKind.pointer_up, x = list_x, y = first_row))
+    expect(panels.library_pane.lead() == 0 and panels.session.developing == library.index.id(0), "a click on the list shows its photo")
+    app.dispatch(Event(kind = EventKind.pointer_down, x = list_x, y = first_row))
+    app.dispatch(Event(kind = EventKind.pointer_moved, x = list_x + 12.0, y = first_row + 6.0))
+    # Home is the second folder: after All Photos and Home itself (names sort), so row 1.
+    let home_y = tree.y + 4.0 + 24.0 * 1.5
+    app.dispatch(Event(kind = EventKind.pointer_moved, x = row_x, y = home_y))
+    app.dispatch(Event(kind = EventKind.pointer_up, x = row_x, y = home_y))
+    expect(library.count_in(home) == 1, "a row dragged from the list moved into Home")
+    photo.close()
+    print("PASS drag: photos dragged from the grid and the list onto folders moved there")
+    return 0

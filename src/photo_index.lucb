@@ -21,6 +21,8 @@ pub struct PhotoIndex:
     ## The search, lower case ("" none), and the presets whose names hold it.
     var search: Buffer
     var search_presets: List[i64]
+    ## The folders shown (a folder and its subfolders); empty: every photo.
+    var folders: List[i64]
 
     ## How many photos the filter shows.
     pub func count() -> i64:
@@ -92,6 +94,8 @@ pub struct PhotoIndex:
         return self.photo(at).label
     pub func preset(at: i64) -> i64:
         return self.photo(at).preset
+    pub func folder(at: i64) -> i64:
+        return self.photo(at).folder
     pub func edited(at: i64) -> bool:
         return self.photo(at).edited
     ## The develop settings' text form ("" when untouched).
@@ -113,6 +117,31 @@ pub struct PhotoIndex:
         self.stored(at).label = label
     pub func set_preset(at: i64, preset: i64):
         self.stored(at).preset = preset
+    pub func set_folder(at: i64, folder: i64):
+        self.stored(at).folder = folder
+
+    ## Move every photo in folder `from` (whatever the filter) into folder
+    ## `to`, in the catalog `store` and here, in one commit.
+    pub func move_folder_photos(store: interop.Reference[prism.Store], from_folder: i64, to: i64) -> !:
+        let held = try store.get()
+        var batch = try catalog.Batch.begin(held)
+        defer batch.close()
+        let photos = self.rows.photos.items()
+        for at in 0..<photos.length:
+            if photos[at].folder == from_folder:
+                try batch.set_mark(photos[at].id, "folder", to)
+                photos[at].folder = to
+        try batch.commit()
+
+    ## How many of the library's photos (whatever the filter) are in one of `folders`.
+    pub func count_in(folders: const i64[]) -> i64:
+        var count: i64 = 0
+        for photo in self.rows.photos.view():
+            for folder in folders:
+                if photo.folder == folder:
+                    count += 1
+                    break
+        return count
     pub func set_settings(at: i64, settings: str) -> !:
         let kept = try self.rows.pool.keep_text(settings.bytes)
         self.stored(at).settings = kept
@@ -123,7 +152,7 @@ pub struct PhotoIndex:
     ## `label` (0 any), and holding `search` (ignoring case) in their name,
     ## camera, lens or capture date, or given one of `presets`; ordered by
     ## capture time.
-    pub func filter(minimum_rating: i64, flags: i64, label: i64, search: str, presets: const i64[]) -> !:
+    pub func filter(minimum_rating: i64, flags: i64, label: i64, search: str, presets: const i64[], folders: const i64[]) -> !:
         self.minimum_rating = minimum_rating
         self.flags = flags
         self.wanted_label = label
@@ -133,7 +162,17 @@ pub struct PhotoIndex:
         self.search_presets.clear()
         for id in presets:
             try self.search_presets.append(id)
+        self.folders.clear()
+        for id in folders:
+            try self.folders.append(id)
         try self.arrange()
+
+    ## Whether `folder` is one of the folders shown.
+    func in_folders(folder: i64) -> bool:
+        for id in self.folders.view():
+            if id == folder:
+                return true
+        return false
 
     ## Whether `photo` holds the search.
     func matches(photo: const Photo*) -> bool:
@@ -159,6 +198,8 @@ pub struct PhotoIndex:
                 continue
             if not self.matches(&photo):
                 continue
+            if self.folders.length() > 0 and not self.in_folders(photo.folder):
+                continue
             try self.order.append((u32)at)
         try sort_by_capture(self.order.items(), self.rows.photos.view())
 
@@ -167,6 +208,7 @@ pub struct PhotoIndex:
         self.order.destroy()
         self.search.destroy()
         self.search_presets.destroy()
+        self.folders.destroy()
 
 pub let photo_index_type: interop.Type[PhotoIndex] = interop.Type[PhotoIndex]("PhotoIndex", PhotoIndex.close, closeable = true)
 
@@ -221,8 +263,8 @@ pub func read_index(store: interop.Reference[prism.Store]) -> interop.Reference[
 ## Set field `name` ("rating", "flag" or "label") to `value` on photos `ids` in
 ## the catalog, in one commit.
 pub func set_marks(store: interop.Reference[prism.Store], ids: const i64[], name: str, value: i64) -> !:
-    if not (name == "rating" or name == "flag" or name == "label" or name == "preset"):
-        error(prism.invalid, "only a rating, flag, label or preset is set this way")
+    if not (name == "rating" or name == "flag" or name == "label" or name == "preset" or name == "folder"):
+        error(prism.invalid, "only a rating, flag, label, preset or folder is set this way")
     let held = try store.get()
     var batch = try catalog.Batch.begin(held)
     defer batch.close()

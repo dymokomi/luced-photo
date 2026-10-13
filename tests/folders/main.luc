@@ -1,0 +1,47 @@
+## Library folders on a fresh library in HOME: folders in folders; the sample
+## raws (luce-raw's, skipped when they are not there) imported into the inner
+## one; counts take in subfolders; photos move between folders; deleting a
+## folder hands its photos and folders to the folder it was in. Prints PASS or
+## traps.
+from photo_library import PhotoLibrary
+from luce_std import files, paths, clock
+
+
+func expect(condition: bool, what: str) -> unit!:
+    if not condition:
+        print(f"FAIL folders: {what}")
+        trap(what)
+
+pub func main(arguments: list[str]) -> int!:
+    let samples = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf"]
+    for sample in samples:
+        if not files.exists(sample):
+            print("skip: no sample raws in ../luce-raw/build/samples (luce-raw/tests/run.py fetches them)")
+            return 0
+    let library = PhotoLibrary(paths.join(files.home_directory(), "Folders.library"))
+    let trips = library.make_folder("Trips", 0)
+    let lisbon = library.make_folder("Lisbon", trips)
+    let family = library.make_folder("Family", 0)
+    expect(library.folders.count() == 3 and library.folders.within(lisbon, trips) and not library.folders.within(trips, lisbon), "folders hold folders")
+    expect(not library.move_folder(trips, lisbon), "a folder does not go inside its own folder")
+    library.show_folder(lisbon)
+    library.start_import(samples)
+    while library.importing():
+        clock.sleep(0.05)
+    _ = library.poll_import()
+    library.reload()
+    expect(library.count_in(lisbon) == 2 and library.count_in(trips) == 2 and library.count_in(family) == 0, "the import went into Lisbon, counted in Trips")
+    library.show_folder(trips)
+    expect(library.index.count() == 2, "Trips shows its subfolder's photos")
+    library.show_folder(lisbon)
+    library.move_photos([0], family)
+    expect(library.count_in(family) == 1 and library.count_in(lisbon) == 1, "a photo moved to Family")
+    library.rename_folder(family, "Home")
+    expect(library.folders.name(library.folders.position_of(family)) == "Home", "a folder renamed")
+    library.delete_folder(trips)
+    let at = library.folders.position_of(lisbon)
+    expect(library.folders.position_of(trips) < 0 and at >= 0 and library.folders.parent(at) == 0, "Lisbon went up when Trips was deleted")
+    expect(library.count_in(lisbon) == 1 and library.count_in(0) == 2, "no photo was lost")
+    library.close()
+    print("PASS folders: nested, imported into, counted, moved, renamed and deleted")
+    return 0

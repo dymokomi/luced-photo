@@ -1,18 +1,25 @@
-## The Library pane: the grid of thumbnails in justified rows, each tile its
+## The Photos pane: the photos of the folder picked in the Library pane
+## (folders_pane.luc), as a grid of thumbnails in justified rows, each tile its
 ## photo's shape, and its bar below with the filter, the count and the row
-## height. Thumbnails stream in from the loader's
+## height; or as a list (List in the bar): a table of name, capture time,
+## camera, lens, rating and preset. Either drags its selected photos onto the
+## Library pane's folders, and the selection carries between them. Thumbnails stream in from the loader's
 ## threads for the cells on screen and a few rows around them; pictures far
 ## from the screen are let go, so a library of any size costs a screenful.
 ## The search field over the grid shows only photos whose name, camera, lens,
 ## capture date or preset holds what is typed. An empty library says how to
 ## fill it, with the import commands at hand; a filter or search that hides
 ## every photo says so.
-from luce_ui.ui import ThumbnailGrid, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, Widget
+from luce_ui.ui import ThumbnailGrid, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget
+from properties import camera_name
 from interop import Connection
 from photo_library import PhotoLibrary
 from thumbs import Loader
 import thumbs
 import library
+
+## The list's rows, as tall as the Library pane's folders.
+pub let list_row_height: float = 24.0
 
 pub class LibraryPane:
     pub let panel: Panel
@@ -27,6 +34,14 @@ pub class LibraryPane:
     let empty_buttons: HStack
     let size: Slider
     pub let search: TextField
+    ## The list, and whether it shows in place of the grid; the bar's switches.
+    pub let list: TableView
+    pub var listing: bool = false
+    let grid_button: Button
+    let list_button: Button
+    ## Whether the pane is the other modes' filmstrip (always the grid).
+    var strip: bool = false
+    var listing_before: bool = false
     let search_row: HStack
     ## The thumbnail size the Library mode keeps, while a filmstrip shows smaller.
     var library_cell: float = 160.0
@@ -52,6 +67,8 @@ pub class LibraryPane:
         self.library = photos
         self.loader = thumbs.start(3, library.thumb_edge)
         self.grid = ThumbnailGrid(photos.index.count(), 160.0, font = font)
+        # Photos drag onto the Library pane's folders.
+        self.grid.set_drag_kind("photos")
         self.count = Text("", font = font, muted = true)
         self.size = Slider("", 64.0, 480.0, 160.0, font = font, show_value = false)
         self.size.layout().set_limits(Size(90.0, 0.0), Size(140.0, 16384.0))
@@ -75,7 +92,26 @@ pub class LibraryPane:
         self.connections.append(self.grid.on_activate(func (lead: int) -> unit!:
             if let open = self.on_open:
                 open(lead)))
-        let bar = HStack([Menu("Filter", self.filters, font = font), Spacer(), self.count, self.size], spacing = 6.0, padding = 4.0)
+        self.list = TableView([TableColumn(title = "Name", weight = 2.0), TableColumn(title = "Captured", width = 150.0),
+                               TableColumn(title = "Camera", weight = 1.0), TableColumn(title = "Lens", weight = 1.0),
+                               TableColumn(title = "Rating", width = 70.0), TableColumn(title = "Preset", weight = 1.0)],
+                              [], row_height = list_row_height, font = font, multiple = true)
+        self.list.set_drag_kind("photos")
+        self.list.layout().set_visible(false)
+        self.connections.append(self.list.on_select(func (lead: int) -> unit!:
+            if let pick = self.on_pick:
+                pick(lead)))
+        self.grid_button = Button("Grid", font = font)
+        self.list_button = Button("List", font = font)
+        self.grid_button.set_grouped(true)
+        self.list_button.set_grouped(true)
+        self.connections.append(self.grid_button.on_click(func () -> unit!:
+            self.show_list(false)))
+        self.connections.append(self.list_button.on_click(func () -> unit!:
+            self.show_list(true)))
+        self.grid_button.set_style(ButtonStyle.selected)
+        let bar = HStack([Menu("Filter", self.filters, font = font), HStack([self.grid_button, self.list_button], spacing = 0.0), Spacer(), self.count, self.size],
+                         spacing = 6.0, padding = 4.0)
         # Above the grid while it shows nothing; the grid stays, so photos drop on it.
         self.empty_title = Text("", font = font)
         self.empty_hint = Text("", font = font, muted = true)
@@ -94,9 +130,9 @@ pub class LibraryPane:
             self.library.set_search(text)
             self.refresh()))
         self.search_row = HStack([self.search], padding = 4.0)
-        let content = VStack([self.search_row, self.empty, self.grid], spacing = 0.0)
+        let content = VStack([self.search_row, self.empty, self.grid, self.list], spacing = 0.0)
         content.layout().set_flex()
-        self.panel = Panel("Library", content, minimum = Size(240.0, 200.0), closable = false, footer = bar, id = "library")
+        self.panel = Panel("Photos", content, minimum = Size(240.0, 200.0), closable = false, footer = bar, id = "library")
         self.refresh()
 
     ## Show the library's index afresh. Positions may now name other photos, so
@@ -114,6 +150,7 @@ pub class LibraryPane:
             self.grid.set_aspect(at, self.aspect_of(at))
             if let picture = self.pictures[index.id(at)]:
                 self.grid.set_image(at, picture)
+        self.fill_list()
         let total = index.total()
         let shown = index.count()
         self.count.set_text(f"{shown} photos" if shown == total else f"{shown} of {total} photos")
@@ -130,6 +167,14 @@ pub class LibraryPane:
     ## thumbnail size, or as a filmstrip along the bottom of the other modes:
     ## one row of small thumbnails, no search.
     pub func set_strip(self, strip: bool) -> unit!:
+        # A filmstrip is the grid; the list comes back with the Library mode.
+        if strip and self.listing:
+            self.show_list(false)
+            self.listing_before = true
+        elif not strip and self.listing_before:
+            self.listing_before = false
+            self.show_list(true)
+        self.strip = strip
         self.search_row.layout().set_visible(not strip)
         if strip:
             self.library_cell = self.grid.cell_size()
@@ -162,6 +207,14 @@ pub class LibraryPane:
         let index = self.library.index
         for at in positions:
             self.grid.set_badges(at, index.rating(at), index.flag(at), index.label(at), index.edited(at), raw = index.kind(at) == "RAW")
+        # The list's rating column too, its selection kept.
+        let picked = self.selection()
+        let lead = self.list.selected_index()
+        self.fill_list()
+        if lead >= 0:
+            self.list.select(lead)
+            for at in picked:
+                self.list.mark(at, true)
 
     ## Let photo `id`'s thumbnail go, so it loads again (its file changed).
     pub func reload_thumbnail(self, id: int) -> unit!:
@@ -175,9 +228,63 @@ pub class LibraryPane:
     pub func selection(self) -> list[int]:
         var picked: list[int] = []
         for at in 0..<self.grid.item_count():
-            if self.grid.is_selected(at):
+            if self.is_selected(at):
                 picked.append(at)
         return picked
+
+    ## The selection, in whichever view shows: its lead (-1 none), its size,
+    ## whether `at` is in it; choosing `at` alone, or every photo.
+    pub func lead(self) -> int:
+        return self.list.selected_index() if self.listing else self.grid.selected_index()
+    pub func selected_count(self) -> int:
+        return self.list.selected_count() if self.listing else self.grid.selected_count()
+    pub func is_selected(self, at: int) -> bool:
+        return self.list.is_selected(at) if self.listing else self.grid.is_selected(at)
+    pub func item_count(self) -> int:
+        return self.grid.item_count()
+    pub func select(self, at: int) -> unit!:
+        self.grid.select(at)
+        self.list.select(at)
+    pub func select_all(self) -> unit!:
+        self.grid.select_all()
+        self.list.select_all()
+
+    ## Show the list (`on`) or the grid, the selection carried across.
+    pub func show_list(self, on: bool) -> unit!:
+        if on == self.listing or (on and self.strip):
+            return
+        let picked = self.selection()
+        let lead = self.lead()
+        self.listing = on
+        self.grid.layout().set_visible(not on)
+        self.list.layout().set_visible(on)
+        self.grid_button.set_style(ButtonStyle.plain if on else ButtonStyle.selected)
+        self.list_button.set_style(ButtonStyle.selected if on else ButtonStyle.plain)
+        if on:
+            self.list.select(lead)
+            for at in picked:
+                self.list.mark(at, true)
+        else:
+            self.grid.select(lead)
+            for at in picked:
+                self.grid.mark(at, true)
+            if lead >= 0:
+                self.grid.reveal(lead)
+
+    ## The list's rows: each photo's name, capture time, camera, lens, rating and preset.
+    func fill_list(self) -> unit!:
+        let index = self.library.index
+        let presets = self.library.presets
+        var cells: list[TableCell] = []
+        for at in 0..<index.count():
+            let preset = presets.position_of(index.preset(at))
+            cells.append(TableCell(text = index.name(at)))
+            cells.append(TableCell(text = index.captured(at).replace("T", "  "), muted = true))
+            cells.append(TableCell(text = camera_name(index.make(at), index.model(at))))
+            cells.append(TableCell(text = index.lens(at), muted = true))
+            cells.append(TableCell(text = "★".repeat(index.rating(at))))
+            cells.append(TableCell(text = presets.name(preset) if preset >= 0 else "", muted = true))
+        self.list.set_rows(cells)
 
     ## Take in finished thumbnails and ask for the ones now on screen; called on
     ## the window's timer.

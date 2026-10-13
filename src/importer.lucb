@@ -44,6 +44,8 @@ struct Room:
     var root: Buffer
     var sources: Buffer
     var store: prism.Store*?
+    ## The library folder the photos go into (0 none).
+    var folder: i64
 
     func post(line: const u8[]):
         self.lock.lock()
@@ -197,7 +199,9 @@ func take_results(job: Job*, tally: Tally*, batch: catalog.Batch*, store: prism.
                 room.post(tally.line.view())
             .added:
                 tally.added += 1
-                try batch.put(&result.photo)
+                var photo = result.photo
+                photo.folder = room.folder
+                try batch.put(&photo)
                 if result.photo.id >= tally.next:
                     tally.next = result.photo.id + 1
                 try batch.set_next(tally.next)
@@ -301,10 +305,12 @@ pub struct Importer:
 pub let importer_type: interop.Type[Importer] = interop.Type[Importer]("Importer", Importer.close, closeable = true, main_thread = true)
 
 ## Import the photo files and folders `sources` into the library bundle at
-## `root`, whose catalog is `store`, on a thread of its own.
-pub func start(store: interop.Reference[prism.Store], root: str, sources: const str[]) -> interop.Reference[Importer]!:
+## `root`, whose catalog is `store`, on a thread of its own; the photos go into
+## library folder `folder` (0 none).
+pub func start(store: interop.Reference[prism.Store], root: str, sources: const str[], folder: i64) -> interop.Reference[Importer]!:
     let room = try new Room in memory.heap
     errdefer free(room) in memory.heap
+    room.folder = folder
     try room.root.put_text(root)
     for path in sources:
         try room.sources.put_text(path)
