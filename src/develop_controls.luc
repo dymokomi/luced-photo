@@ -84,7 +84,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "paper_surface", "print_material", "print_optical", "film_backing", "develop_agitation", "geometry_turn"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "scan_resolution", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "paper_surface", "print_material", "print_optical", "film_backing", "develop_agitation", "geometry_turn"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -286,6 +286,9 @@ pub class DevelopControls:
             specs.insert(1, ParameterSpec(name = "scan_calibration", label = "Calibration", kind = ParameterKind.menu,
                                           items = "Reference (Vision3 250D)=0|Matched to the stock=1",
                                           doc = "Reference: the scanner set up once, each stock showing its own color. Matched: fitted to this stock, colors returned to themselves"))
+            specs.insert(2, ParameterSpec(name = "scan_resolution", label = "Resolution", kind = ParameterKind.menu,
+                                          items = "HD telecine (1920)=0|SD telecine (720)=1|2K scan=2|4K scan=3|6K scan=4",
+                                          doc = "How finely the scanner samples the film: grain and detail are what it resolves, however far the viewer zooms"))
         if title == "Develop":
             # Its items follow the stock (show_values): its standard process,
             # then the others of its family.
