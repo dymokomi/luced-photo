@@ -18,6 +18,7 @@ from luce_develop import process
 from luce_develop.settings import parse
 from luce_std import files
 import library
+from luce_ui import ui
 
 struct Job:
     var id: i64
@@ -37,6 +38,9 @@ struct Shared:
     var jobs: List[Job]
     var done: List[i64]
     var stopping: bool
+    ## Who to tell when there is something to take: the window's notifier,
+    ## held for this thread (luce-ui's notify_handle), none before `wake_with`.
+    var waker: ui.NotifyHandle?
 
 func work(context: void*?):
     let shared = (Shared*)(context else return)
@@ -58,6 +62,8 @@ func work(context: void*?):
         shared.lock.lock()
         shared.done.append(job.id) catch failure:
             _ = failure
+        if let waker = shared.waker:
+            waker.notify()
         shared.lock.unlock()
 
 ## Develop `job`'s photo into its developed picture, its stamp, and its
@@ -104,6 +110,17 @@ pub struct Rerenderer:
         shared.lock.unlock()
         shared.wake.signal()
 
+    ## Notify `notifier` whenever something finishes, so the window takes it
+    ## on its loop's next turn instead of polling.
+    pub func wake_with(notifier: interop.Reference[ui.Notifier]) -> !:
+        let shared = self.shared else return
+        let handle = try ui.notify_handle(notifier)
+        shared.lock.lock()
+        if let old = shared.waker:
+            old.release()
+        shared.waker = handle
+        shared.lock.unlock()
+
     ## The next photo whose files were made again, or -1.
     pub func take() -> i64:
         let shared = self.shared else return -1
@@ -127,6 +144,8 @@ pub struct Rerenderer:
             job.release()
         shared.jobs.destroy()
         shared.done.destroy()
+        if let waker = shared.waker:
+            waker.release()
         free(shared) in memory.heap
         self.shared = none
 

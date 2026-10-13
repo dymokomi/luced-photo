@@ -13,6 +13,7 @@ from luce_std import files
 from luce_develop import source
 from luce_develop.picture import Picture
 from luce_std.collections import List
+from luce_ui import ui
 
 ## The most decoding threads a loader runs.
 let most_workers: usize = 8
@@ -38,6 +39,9 @@ struct Shared:
     var stopping: bool
     ## Pixels decoded at most this long on their longer side.
     var edge: usize
+    ## Who to tell when there is something to take: the window's notifier,
+    ## held for this thread (luce-ui's notify_handle), none before `wake_with`.
+    var waker: ui.NotifyHandle?
 
     func close():
         for request in self.pending.view():
@@ -47,6 +51,9 @@ struct Shared:
             var picture = done.picture
             picture.close()
         self.finished.destroy()
+        if let waker = self.waker:
+            waker.release()
+        self.waker = none
 
 ## A worker: take the newest request, decode it, hand the picture back.
 func work(context: void*?):
@@ -71,6 +78,8 @@ func work(context: void*?):
             shared.finished.append(Finished(index = request.index, generation = request.generation, picture = decoded)) catch failure:
                 var dropped = decoded
                 dropped.close()
+            if let waker = shared.waker:
+                waker.notify()
         else:
             var stale = decoded
             stale.close()
@@ -88,6 +97,17 @@ pub struct Loader:
     ## The picture `take` last handed out.
     var taken: Picture
     var taken_index: i64
+
+    ## Notify `notifier` whenever something finishes, so the window takes it
+    ## on its loop's next turn instead of polling.
+    pub func wake_with(notifier: interop.Reference[ui.Notifier]) -> !:
+        let shared = self.shared else return
+        let handle = try ui.notify_handle(notifier)
+        shared.lock.lock()
+        if let old = shared.waker:
+            old.release()
+        shared.waker = handle
+        shared.lock.unlock()
 
     ## Ask for the thumbnail of grid item `index` from the file at `path`.
     pub func request(index: i64, path: str) -> !:

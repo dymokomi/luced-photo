@@ -355,6 +355,9 @@ pub class DevelopControls:
         self.connections.append(section.panel.on_change(func (index: int) -> unit!:
             if not self.showing:
                 self.take(section, index)))
+        # A folder opened or closed: the widget under it with it.
+        self.connections.append(section.panel.on_folder(func (index: int) -> unit!:
+            self.show_extras()))
         self.connections.append(section.panel.on_action(func (index: int) -> unit!:
             self.act(section, section.names[index])))
 
@@ -614,7 +617,7 @@ pub class DevelopControls:
                     if name != section.title and name != "stage_on":
                         section.panel.set_enabled(index, on)
         self.show_essays(self.subject(mode))
-        self.tick()
+        self.show_extras()
 
     ## The stage a mode's essays are about: the film, its development, what
     ## the output does with it; none for Library and View.
@@ -704,7 +707,9 @@ pub class DevelopControls:
         self.showing = was
 
     ## Show each section's widget while its folder is open; called on the window's timer.
-    pub func tick(self):
+    ## The widgets under sections (the curve editor, the tone wheels): shown
+    ## while their section shows and its folder is open.
+    func show_extras(self):
         for section in self.sections:
             if let extra = section.extra:
                 extra.layout().set_visible(section.shown and section.is_open())

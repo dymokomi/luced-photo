@@ -30,6 +30,7 @@ from import_worker import Job, Result
 from luce_std.collections import Buffer, TextPool, List
 import facts
 import library
+from luce_ui import ui
 
 ## How many photos each commit carries.
 let commit_every: usize = 6
@@ -46,6 +47,9 @@ struct Room:
     var store: prism.Store*?
     ## The library folder the photos go into (0 none).
     var folder: i64
+    ## The window's notifier, told of every event and of the end (none: polled
+    ## by a caller with no loop, as the tests are).
+    var waker: ui.NotifyHandle?
 
     func post(line: const u8[]):
         self.lock.lock()
@@ -54,6 +58,8 @@ struct Room:
             return
         self.events.put_byte('\n') catch failure:
             return
+        if let waker = self.waker:
+            waker.notify()
 
     func drain(out: Buffer*) -> !:
         self.lock.lock()
@@ -74,6 +80,8 @@ struct Room:
     func finish():
         self.lock.lock()
         self.finished = true
+        if let waker = self.waker:
+            waker.notify()
         self.lock.unlock()
 
     func is_finished() -> bool:
@@ -85,6 +93,9 @@ struct Room:
         self.events.destroy()
         self.root.destroy()
         self.sources.destroy()
+        if let waker = self.waker:
+            waker.release()
+        self.waker = none
 
 ## The import thread: import every file the room names, then report.
 func serve(context: void*?):
@@ -306,11 +317,15 @@ pub let importer_type: interop.Type[Importer] = interop.Type[Importer]("Importer
 
 ## Import the photo files and folders `sources` into the library bundle at
 ## `root`, whose catalog is `store`, on a thread of its own; the photos go into
-## library folder `folder` (0 none).
-pub func start(store: interop.Reference[prism.Store], root: str, sources: const str[], folder: i64) -> interop.Reference[Importer]!:
+## library folder `folder` (0 none); `notifier` hears of every event (none:
+## the caller polls).
+pub func start(store: interop.Reference[prism.Store], root: str, sources: const str[], folder: i64,
+               notifier: interop.Reference[ui.Notifier]? = none) -> interop.Reference[Importer]!:
     let room = try new Room in memory.heap
     errdefer free(room) in memory.heap
     room.folder = folder
+    if let told = notifier:
+        room.waker = try ui.notify_handle(told)
     try room.root.put_text(root)
     for path in sources:
         try room.sources.put_text(path)

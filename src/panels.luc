@@ -7,7 +7,7 @@
 ## shows the lead one in the viewer and Properties; ratings, flags and labels
 ## act on the whole selection; an import's progress shows in the status line
 ## while the grid fills in.
-from luce_ui.ui import VStack, HStack, Text, Font, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
+from luce_ui.ui import Notifier, VStack, HStack, Text, Font, Spacer, DStack, DockPosition, Application, Menu, CommandPalette, Command
 from interop import Connection
 from actions import Actions, label_number
 from photo_library import PhotoLibrary
@@ -31,8 +31,8 @@ import remembered
 import library
 
 
-## How often the grid reloads the catalog while an import adds photos, in ticks.
-let reload_ticks: int = 20
+## Seconds the grid waits, once an import adds photos, before it reads the catalog again.
+let new_photos_delay: float = 1.0
 
 pub class Panels:
     pub let body: VStack
@@ -59,8 +59,10 @@ pub class Panels:
     var connections: list[Connection] = []
     ## The developed photo: saving, undo and redo, settings between photos.
     pub let session: DevelopSession
-    ## Ticks since the import last added photos the grid has not shown, or -1.
-    var unshown: int = -1
+    ## Whether photos an import added will show soon (a reload is waiting).
+    var showing_soon: bool = false
+    ## The workers' notifiers (`connect`).
+    var notifiers: list[Notifier] = []
     pub var app: Application? = none
 
     pub func init(self, font: Font, root: str) -> unit!:
@@ -129,7 +131,7 @@ pub class Panels:
             self.session.changed()
         self.viewer.on_developed = func (temperature: float, tint: float, seconds: float) -> unit!:
             self.properties.develop.set_shot(temperature, tint, seconds)
-            self.session.histogram_due = 2
+            self.viewer.want_histogram()
         self.bind_actions()
         let actions = self.actions
         let toolbar = HStack([Spacer(), self.mode_bar, Spacer(),
@@ -304,7 +306,7 @@ pub class Panels:
             self.tell(f"Could not open {paths.base(root)}: {failure.message}")
             return
         self.session.forget()
-        self.unshown = -1
+        self.showing_soon = false
         self.library_pane.show_library()
         self.folders.refresh()
         self.presets.show()
@@ -363,8 +365,13 @@ pub class Panels:
                     self.tell(f"Importing {fields[1]} files…")
                 "added":
                     self.tell(f"Imported {fields[2]} of {fields[3]}: {fields[4]}")
-                    if self.unshown < 0:
-                        self.unshown = 0
+                    # New photos show a few at a time while the import goes on.
+                    if not self.showing_soon:
+                        self.showing_soon = true
+                        if let app = self.app:
+                            _ = app.after(new_photos_delay, func () -> unit!:
+                                if self.showing_soon:
+                                    self.show_new_photos())
                 "skipped":
                     self.tell(f"Already in the library: {fields[1]}")
                 "failed":
@@ -378,15 +385,10 @@ pub class Panels:
                     self.tell(f"The import stopped: {fields[1]}")
                 _:
                     continue
-        # New photos show a few at a time while the import goes on.
-        if self.unshown >= 0:
-            self.unshown += 1
-            if self.unshown >= reload_ticks:
-                self.show_new_photos()
 
     ## Read the catalog again and show it, keeping the lead photo selected.
     func show_new_photos(self) -> unit!:
-        self.unshown = -1
+        self.showing_soon = false
         let photos = self.library_pane
         let lead = photos.lead()
         let lead_id = self.library.index.id(lead) if lead >= 0 else -1
@@ -507,24 +509,33 @@ pub class Panels:
 
     # mark: the timer ===========================================================================
 
-    ## Take in thumbnails, the viewer's preview and the import's progress; called
-    ## on the window's timer.
-    pub func poll(self) -> unit!:
-        self.library_pane.tick()
-        self.viewer.tick()
-        self.take_export_events()
-        self.properties.develop.tick()
-        if self.session.histogram_due >= 0:
-            self.session.histogram_due -= 1
-            if self.session.histogram_due < 0:
-                self.properties.histogram.set_bins(self.viewer.histogram())
-        self.take_import_events()
+    ## Wire the background work to `app`'s loop: each worker's notifier runs
+    ## what takes its results (no timer polls them), the save waits on
+    ## `app.after`, and the histogram is measured right after the develop draws.
+    pub func connect(self, app: Application) -> unit!:
+        self.library_pane.wake_with(app)
+        self.viewer.wake_with(app)
+        self.session.connect(app)
+        let exported = app.notifier(self.take_export_events)
+        self.exporter.wake_with(exported)
+        let redone = app.notifier(self.take_redone)
+        self.rerenderer.wake_with(redone)
+        let imported = app.notifier(self.take_import_events)
+        self.library.import_notifier = imported
+        self.notifiers = [exported, redone, imported]
+        self.viewer.on_histogram = func () -> unit!:
+            # Read back after this frame, from the loop's next turn.
+            _ = app.post(func () -> unit!:
+                self.properties.histogram.set_bins(self.viewer.histogram()))
+
+    ## Photos whose developed pictures were made again: their thumbnails, and
+    ## the viewer's picture.
+    func take_redone(self) -> unit!:
         var redone = self.rerenderer.take()
         while redone >= 0:
             self.library_pane.reload_thumbnail(redone)
             self.viewer.picture_ready(redone, self.library.developed_path(redone))
             redone = self.rerenderer.take()
-        self.session.tick()
 
     pub func tell(self, text: str) -> unit!:
         self.status.set_text(text)
@@ -532,6 +543,8 @@ pub class Panels:
     pub func close(self):
         self.session.flush() catch failure:
             _ = failure
+        for notifier in self.notifiers:
+            notifier.close()
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()

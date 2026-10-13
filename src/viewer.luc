@@ -24,13 +24,15 @@
 ## perspective) with its guides over it. Drag on the photo to draw a guide (four
 ## at most), drag a guide's end to move it, right-click a guide to remove it;
 ## `on_guides` hears every change.
-from luce_ui.ui import Widget, Layout, Size, Constraints, Event, Painter, Image, Panel, Point
+from luce_ui.ui import Application, Notifier, Widget, Layout, Size, Constraints, Event, Painter, Image, Panel, Point
 from luce_gpu.gpu import RenderTarget, Rect
 from luce_window.input import Cursor, EventKind, ScrollUnit
 from luce_std import math
 from luce_std import clock
 from luce_develop.renderer import Renderer
 from luce_develop import renderer
+import wakers
+from wakers import Waker
 from luce_develop.settings import Look
 from thumbs import Loader
 import thumbs
@@ -72,6 +74,13 @@ pub class Viewer: Widget:
     ## develop was asked for.
     var live: bool = true
     var developing: bool = false
+    ## Told when a preview or a develop is ready (`wake_with`), and the waker
+    ## that has the develop's loading thread notify it.
+    var ready: Notifier? = none
+    var waker: Waker? = none
+    ## A histogram is wanted once the develop next draws (`want_histogram`).
+    var histogram_wanted: bool = false
+    pub var on_histogram: func() -> unit!? = none
     var full_width: float = 0.0
     var full_height: float = 0.0
     var full_asked: bool = false
@@ -252,8 +261,21 @@ pub class Viewer: Widget:
         self.picture = none
         self.box.invalidate()
 
-    ## Take in a finished preview or develop; called on the window's timer.
-    pub func tick(self) -> unit!:
+    ## Take previews and develops as their threads finish them: `app` runs
+    ## `take_ready` when they say so.
+    pub func wake_with(self, app: Application) -> unit!:
+        let notifier = app.notifier(self.take_ready)
+        self.loader.wake_with(notifier)
+        self.waker = wakers.wake_renderer(self.developer, notifier)
+        self.ready = notifier
+
+    ## Measure the histogram (`on_histogram`) once the develop has drawn.
+    pub func want_histogram(self) -> unit!:
+        self.histogram_wanted = true
+        self.box.invalidate()
+
+    ## Take in a finished preview or develop.
+    func take_ready(self) -> unit!:
         let id = self.loader.take()
         if id >= 0 and id == self.wanted:
             let picture = Image(self.loader.taken_width(), self.loader.taken_height())
@@ -265,9 +287,6 @@ pub class Viewer: Widget:
         if self.developer.poll():
             if let tell = self.on_developed:
                 tell(self.developer.shot_temperature(), self.developer.shot_tint(), self.developer.shot_seconds())
-            self.box.invalidate()
-        # Development being watched: draw its next moment.
-        if self.developer.animating():
             self.box.invalidate()
 
     pub func layout(self) -> Layout:
@@ -295,6 +314,14 @@ pub class Viewer: Widget:
             if self.developer.is_refining():
                 self.draw_refining(painter, place)
             self.ask_full(place)
+            # Development watched, or grain still refining: the next frame
+            # carries it on.
+            if self.developer.animating():
+                self.box.invalidate()
+            if self.histogram_wanted:
+                self.histogram_wanted = false
+                if let measure = self.on_histogram:
+                    measure()
             return
         let picture = self.picture else return
         let place = self.placement(float(picture.width()), float(picture.height()))
@@ -686,6 +713,10 @@ pub class Viewer: Widget:
             self.tell_guides()
 
     pub func close(self):
+        if let waker = self.waker:
+            waker.close()
+        if let notifier = self.ready:
+            notifier.close()
         self.loader.close()
         self.developer.close()
 

@@ -12,6 +12,7 @@ import thread
 from luce_std.collections import Buffer, List
 from luce_std import paths
 from luce_develop import export
+from luce_ui import ui
 
 struct Job:
     ## NUL-terminated heap copies (strings.copy).
@@ -39,6 +40,9 @@ struct Shared:
     var written: i64
     var failed: i64
     var stopping: bool
+    ## Who to tell when there is something to take: the window's notifier,
+    ## held for this thread (luce-ui's notify_handle), none before `wake_with`.
+    var waker: ui.NotifyHandle?
 
     func post_line(fields: const str[]):
         var line: Buffer
@@ -54,6 +58,8 @@ struct Shared:
             return
         self.events.put_byte('\n') catch failure:
             return
+        if let waker = self.waker:
+            waker.notify()
 
 func work(context: void*?):
     let shared = (Shared*)(context else return)
@@ -148,6 +154,17 @@ pub struct Exporter:
         shared.events.clear()
         return self.polled.text()
 
+    ## Notify `notifier` whenever something finishes, so the window takes it
+    ## on its loop's next turn instead of polling.
+    pub func wake_with(notifier: interop.Reference[ui.Notifier]) -> !:
+        let shared = self.shared else return
+        let handle = try ui.notify_handle(notifier)
+        shared.lock.lock()
+        if let old = shared.waker:
+            old.release()
+        shared.waker = handle
+        shared.lock.unlock()
+
     pub func close():
         let shared = self.shared else return
         shared.lock.lock()
@@ -160,6 +177,8 @@ pub struct Exporter:
             job.release()
         shared.jobs.destroy()
         shared.events.destroy()
+        if let waker = shared.waker:
+            waker.release()
         free(shared) in memory.heap
         self.shared = none
         self.polled.destroy()

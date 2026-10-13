@@ -1,7 +1,7 @@
 ## The Photos pane: the photos of the folder picked in the Library pane
 ## (folders_pane.luc), as a grid of thumbnails in justified rows, each tile its
 ## photo's shape, and its bar below with the filter, the count and the row
-## height; or as a list (List in the bar): a table of name, capture time,
+## height; or as a list (List beside the search): a table of name, capture time,
 ## camera, lens, rating and preset. Either drags its selected photos onto the
 ## Library pane's folders, and the selection carries between them. Thumbnails stream in from the loader's
 ## threads for the cells on screen and a few rows around them; pictures far
@@ -10,7 +10,7 @@
 ## capture date or preset holds what is typed. An empty library says how to
 ## fill it, with the import commands at hand; a filter or search that hides
 ## every photo says so.
-from luce_ui.ui import ThumbnailGrid, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget
+from luce_ui.ui import Application, Notifier, ThumbnailGrid, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget
 from properties import camera_name
 from interop import Connection
 from photo_library import PhotoLibrary
@@ -34,6 +34,8 @@ pub class LibraryPane:
     let empty_buttons: HStack
     let size: Slider
     pub let search: TextField
+    ## Told by the loader's threads when thumbnails are ready (`wake_with`).
+    var loaded: Notifier? = none
     ## The list, and whether it shows in place of the grid; the bar's switches.
     pub let list: TableView
     pub var listing: bool = false
@@ -84,6 +86,9 @@ pub class LibraryPane:
                 self.refresh()))
         self.connections.append(self.size.on_change(func (value: float) -> unit!:
             self.grid.set_cell_size(value)))
+        # The cells on screen changed (a scroll, a resize): load theirs.
+        self.connections.append(self.grid.on_visible(func (first: int) -> unit!:
+            self.load_visible()))
         self.connections.append(self.grid.on_resize(func (cell: int) -> unit!:
             self.size.set_value(float(cell))))
         self.connections.append(self.grid.on_select(func (lead: int) -> unit!:
@@ -110,8 +115,7 @@ pub class LibraryPane:
         self.connections.append(self.list_button.on_click(func () -> unit!:
             self.show_list(true)))
         self.grid_button.set_style(ButtonStyle.selected)
-        let bar = HStack([Menu("Filter", self.filters, font = font), HStack([self.grid_button, self.list_button], spacing = 0.0), Spacer(), self.count, self.size],
-                         spacing = 6.0, padding = 4.0)
+        let bar = HStack([Menu("Filter", self.filters, font = font), Spacer(), self.count, self.size], spacing = 6.0, padding = 4.0)
         # Above the grid while it shows nothing; the grid stays, so photos drop on it.
         self.empty_title = Text("", font = font)
         self.empty_hint = Text("", font = font, muted = true)
@@ -125,11 +129,11 @@ pub class LibraryPane:
         self.empty_buttons = HStack(buttons, spacing = 8.0)
         self.empty = VStack([HStack([Spacer(), self.empty_title, Spacer()]), HStack([Spacer(), self.empty_hint, Spacer()]), self.empty_buttons],
                             spacing = 10.0, padding = 24.0)
-        self.search = TextField("", font = font, placeholder = "Search name, camera, lens, date, preset", cells = 48.0)
+        self.search = TextField("", font = font, placeholder = "Search", cells = 16.0)
         self.connections.append(self.search.on_change(func (text: str) -> unit!:
             self.library.set_search(text)
             self.refresh()))
-        self.search_row = HStack([self.search], padding = 4.0)
+        self.search_row = HStack([self.search, HStack([self.grid_button, self.list_button], spacing = 0.0)], spacing = 6.0, padding = 4.0)
         let content = VStack([self.search_row, self.empty, self.grid, self.list], spacing = 0.0)
         content.layout().set_flex()
         self.panel = Panel("Photos", content, minimum = Size(240.0, 200.0), closable = false, footer = bar, id = "library")
@@ -288,7 +292,15 @@ pub class LibraryPane:
 
     ## Take in finished thumbnails and ask for the ones now on screen; called on
     ## the window's timer.
-    pub func tick(self) -> unit!:
+    ## Take thumbnails as the loader's threads finish them: `app` runs it when
+    ## they say so.
+    pub func wake_with(self, app: Application) -> unit!:
+        let notifier = app.notifier(self.take_thumbnails)
+        self.loader.wake_with(notifier)
+        self.loaded = notifier
+
+    ## Put the thumbnails the loader finished into the grid.
+    func take_thumbnails(self) -> unit!:
         var at = self.loader.take()
         while at >= 0:
             if at < self.grid.item_count():
@@ -302,6 +314,10 @@ pub class LibraryPane:
                 self.grid.set_aspect(at, aspect)
             _ = self.requested.remove(at)
             at = self.loader.take()
+
+    ## Ask for the thumbnails of the cells on screen and a few rows around
+    ## them, and let go of those far from it.
+    func load_visible(self) -> unit!:
         let first = self.grid.first_visible()
         let last = self.grid.last_visible()
         if last <= first:
@@ -350,4 +366,6 @@ pub class LibraryPane:
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()
+        if let notifier = self.loaded:
+            notifier.close()
         self.loader.close()

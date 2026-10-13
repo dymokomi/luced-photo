@@ -2,6 +2,7 @@
 ## photos the panes read, the develop recipes, and the import that may be running. The panes never
 ## touch the catalog themselves; they ask the library.
 from luce_prism import prism
+from luce_ui.ui import Notifier
 from luce_std import files
 from luce_std import paths
 import library
@@ -30,6 +31,8 @@ pub class PhotoLibrary:
     ## The library's folders; read again after every change.
     pub var folders: FolderList
     var running: Importer? = none
+    ## Told of an import's progress, so the window takes it (none: poll it).
+    pub var import_notifier: Notifier? = none
     ## The folder shown (0: every photo), and it with its subfolders' ids.
     pub var folder: int = 0
     var shown_folders: list[int] = []
@@ -107,7 +110,7 @@ pub class PhotoLibrary:
             if not current.finished():
                 error(busy, "an import is already running")
             current.close()
-        self.running = importer.start(self.store, self.root, sources, self.folder)
+        self.running = importer.start(self.store, self.root, sources, self.folder, self.import_notifier)
 
     ## Whether an import is running.
     pub func importing(self) -> bool:

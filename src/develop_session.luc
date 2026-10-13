@@ -12,9 +12,10 @@ from viewer import Viewer
 from library_pane import LibraryPane
 from rerender import Rerenderer
 from luce_develop import settings
+from luce_ui.ui import Application
 
-## Ticks (of 0.05 s) an edit waits for more before it is saved as one step.
-let save_ticks: int = 10
+## Seconds an edit waits for more before it is saved as one step.
+let save_delay: float = 0.5
 ## The most undo steps kept per photo.
 let history_limit: int = 100
 
@@ -60,17 +61,19 @@ pub class DevelopSession:
     let viewer: Viewer
     let pane: LibraryPane
     let rerenderer: Rerenderer
-    ## The photo developed (an id, -1 for none), its settings as last saved, and
-    ## ticks since an unsaved edit (-1: none).
+    ## The photo developed (an id, -1 for none), its settings as last saved,
+    ## whether an edit is not saved yet, and the save waiting for it (an
+    ## Application.after handle, -1 none).
     pub var developing: int = -1
     var committed: str = ""
-    var unsaved_ticks: int = -1
+    var unsaved: bool = false
+    var save_due: int = -1
+    ## The window, for the save's delay (`connect`).
+    var app: Application? = none
     var undo_steps: map[int, list[str]] = {}
     var redo_steps: map[int, list[str]] = {}
     ## Copied settings, without framing.
     var copied: str? = none
-    ## Ticks until the histogram is measured again (-1: not due).
-    pub var histogram_due: int = -1
     pub var on_status: func(str) -> unit!? = none
 
     pub func init(self, library: PhotoLibrary, controls: DevelopControls, viewer: Viewer, pane: LibraryPane, rerenderer: Rerenderer):
@@ -105,22 +108,29 @@ pub class DevelopSession:
         # An edit shows as it is made, even in the Library mode.
         self.viewer.go_live()
         self.viewer.set_look(self.controls.look)
-        self.histogram_due = 6
-        if self.developing >= 0:
-            self.unsaved_ticks = 0
+        self.viewer.want_histogram()
+        if self.developing < 0:
+            return
+        self.unsaved = true
+        # Saved once edits settle: each edit puts the save off again.
+        let app = self.app else return
+        if self.save_due >= 0:
+            app.cancel(self.save_due)
+        self.save_due = app.after(save_delay, self.flush)
 
-    ## Called on the window's timer.
-    pub func tick(self) -> unit!:
-        if self.unsaved_ticks >= 0:
-            self.unsaved_ticks += 1
-            if self.unsaved_ticks >= save_ticks:
-                self.flush()
+    ## Run the save's delay on `app`.
+    pub func connect(self, app: Application) -> unit!:
+        self.app = app
 
     ## Save an edit not saved yet, as one undo step.
     pub func flush(self) -> unit!:
-        if self.unsaved_ticks < 0 or self.developing < 0:
+        if self.save_due >= 0:
+            if let app = self.app:
+                app.cancel(self.save_due)
+            self.save_due = -1
+        if not self.unsaved or self.developing < 0:
             return
-        self.unsaved_ticks = -1
+        self.unsaved = false
         let text = self.controls.look.text()
         if text == self.committed:
             return
@@ -151,7 +161,7 @@ pub class DevelopSession:
     func take(self, text: str) -> unit!:
         self.controls.reload(text)
         self.viewer.set_look(self.controls.look)
-        self.histogram_due = 2
+        self.viewer.want_histogram()
         self.store(self.developing, text)
         self.committed = text
 

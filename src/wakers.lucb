@@ -1,0 +1,46 @@
+## The develop renderer's loading thread (luce-develop's renderer.lucb) wakes
+## the window through a luce-ui notifier: luce-develop knows nothing of the UI
+## and takes a plain function and context (renderer.Wake), and a Waker holds
+## the notifier's thread handle that function notifies, for as long as the
+## renderer may call it. Close the Waker before the renderer: it stops the
+## renderer calling first.
+import interop
+import memory
+from luce_ui import ui
+from luce_develop import renderer
+from luce_develop.renderer import Renderer
+
+## The notifier's handle, on the heap where the loading thread reaches it.
+struct Held:
+    var handle: ui.NotifyHandle
+
+pub struct Waker:
+    var held: Held*?
+    var told: interop.Reference[Renderer]?
+
+    ## Stop `renderer` calling, then let the handle go.
+    pub func close():
+        if let developer = self.told:
+            (developer.get() catch failure:
+                trap("the renderer is gone")).tell(none)
+            developer.release()
+        self.told = none
+        if let held = self.held:
+            held.handle.release()
+            free(held) in memory.heap
+        self.held = none
+
+pub let waker_type: interop.Type[Waker] = interop.Type[Waker]("Waker", Waker.close, closeable = true, main_thread = true)
+
+## What the loading thread calls: notify.
+func notify(context: void*):
+    let held = (Held*)context
+    held.handle.notify()
+
+## Have `developer`'s loading thread notify `notifier` whenever a scene is ready.
+pub func wake_renderer(developer: interop.Reference[Renderer], notifier: interop.Reference[ui.Notifier]) -> interop.Reference[Waker]!:
+    let held = try new Held(handle = try ui.notify_handle(notifier)) in memory.heap
+    errdefer free(held) in memory.heap
+    (try developer.get()).tell(renderer.Wake(call = notify, context = (void*)held))
+    let made = try new Waker(held = held, told = developer.clone()) in memory.heap
+    return try interop.Reference[Waker].adopt(made, waker_type, memory.heap)
