@@ -1,8 +1,9 @@
 ## luced-photo's entry point: open the library and run the window.
 ## `--library DIR` opens the bundle at DIR (default: the library last open, else
 ## ~/Pictures/Luced Photo.library);
-## `--import PATH` imports a file or folder at start; `--smoke` draws three frames
-## and exits.
+## `--import PATH` imports a file or folder at start; `--mode N` opens in mode N
+## (0 Library to 4 View) and `--photo N` with the Nth photo shown (for checking
+## the window); `--smoke` draws three frames and exits.
 from app import LucedPhoto
 from photo_library import default_root
 import remembered
@@ -10,15 +11,26 @@ import remembered
 pub func main(arguments: list[str]) -> int!:
     var root = ""
     var sources: list[str] = []
+    var mode = 0
+    var shown = -1
     for at in 0..<arguments.length - 1:
         if arguments[at] == "--library":
             root = arguments[at + 1]
         elif arguments[at] == "--import":
             sources.append(arguments[at + 1])
+        elif arguments[at] == "--mode":
+            mode = int(arguments[at + 1]) catch _:
+                continue
+        elif arguments[at] == "--photo":
+            shown = int(arguments[at + 1]) catch _:
+                continue
     if root == "":
         root = remembered.last_library()
     let photo = LucedPhoto(root if root != "" else default_root())
     photo.panels.start_import(sources)
+    if shown >= 0:
+        photo.panels.show_photo(shown)
+    photo.panels.set_mode(mode)
     photo.run(arguments)
     photo.close()
     return 0

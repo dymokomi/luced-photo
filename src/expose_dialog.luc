@@ -1,0 +1,104 @@
+## Which of a preset's parameters the Library mode shows: a dialog of switches,
+## one per parameter the preset sets (and the exposure and white balance,
+## always offered), each under its section's name. OK reports the switched-on
+## parameters' names, "|" between.
+from luce_ui.ui import Text, Font, Dialog, HStack, Spacer, Button, Widget, ParameterPanel, ParameterSpec, ParameterKind
+from interop import Connection
+from luce_develop import settings
+
+pub class ExposeDialog:
+    pub let dialog: Dialog
+    let font: Font
+    let heading: Text
+    let note: Text
+    let buttons: HStack
+    var panel: ParameterPanel? = none
+    ## The parameters offered, in the panel's order after its first row.
+    var names: list[str] = []
+    var connections: list[Connection] = []
+    ## OK: the chosen names, "|" between.
+    pub var chosen: func(str) -> unit!? = none
+
+    pub func init(self, font: Font) -> unit!:
+        self.font = font
+        self.heading = Text("", font = font)
+        self.note = Text("Shown for photos with this preset in the Library mode.", font = font, muted = true)
+        let cancel = Button("Cancel", font = font)
+        let accept = Button("Show in Library", font = font)
+        self.connections.append(cancel.on_click(self.hide))
+        self.connections.append(accept.on_click(self.accept))
+        self.buttons = HStack([Spacer(), cancel, accept], spacing = 8.0)
+        self.dialog = Dialog([self.heading, self.note, self.buttons], width = 420.0)
+        self.connections.append(self.dialog.on_cancel(self.hide))
+        self.connections.append(self.dialog.on_accept(self.accept))
+
+    ## Ask which of the parameters preset settings `text` sets to show, those
+    ## in `shown` ("|" between) switched on, under `title`.
+    pub func open(self, title: str, text: str, shown: str) -> unit!:
+        self.heading.set_text(title)
+        self.names = offered(text)
+        let on = shown.split("|")
+        var specs = [ParameterSpec(name = "show", label = "Show", kind = ParameterKind.info)]
+        var section = ""
+        for name in self.names:
+            let at = index_of(name)
+            if settings.section_of(at) != section:
+                section = settings.section_of(at)
+                specs.append(ParameterSpec(name = f"section {section}", label = section, kind = ParameterKind.separator))
+            specs.append(ParameterSpec(name = name, label = settings.label_of(at), kind = ParameterKind.toggle, value = 1.0 if name in on else 0.0,
+                                       resettable = false))
+        let panel = ParameterPanel(specs, font = self.font, label_width = 140.0, margin = 0.0, dense = true)
+        self.panel = panel
+        var rows: list[Widget] = [self.heading, self.note, panel, self.buttons]
+        self.dialog.set_children(rows)
+        self.dialog.open()
+
+    func accept(self) -> unit!:
+        let panel = self.panel else return
+        var on: list[str] = []
+        for (at, spec_name) in self.spec_names().indexed():
+            if spec_name in self.names and panel.value(at) > 0.5:
+                on.append(spec_name)
+        self.hide()
+        if let tell = self.chosen:
+            tell(on.join("|"))
+
+    ## The panel's rows' names, in order (as `open` made them).
+    func spec_names(self) -> list[str]:
+        var out = ["show"]
+        var section = ""
+        for name in self.names:
+            let at = index_of(name)
+            if settings.section_of(at) != section:
+                section = settings.section_of(at)
+                out.append(f"section {section}")
+            out.append(name)
+        return out
+
+    func hide(self) -> unit!:
+        self.dialog.hide()
+
+    pub func close(self):
+        for connection in self.connections:
+            connection.disconnect()
+        self.connections.clear()
+
+## The parameters a preset with settings `text` offers to show: the exposure
+## and the white balance, then every one it sets away from its default, in the
+## parameter table's order.
+pub func offered(text: str) -> list[str]!:
+    let given = settings.look(text)
+    var out = ["exposure", "temperature", "tint"]
+    for at in 0..<settings.parameter_total():
+        let name = settings.name_of(at)
+        if name in out:
+            continue
+        if given.get(name) != settings.default_of(at):
+            out.append(name)
+    return out
+
+func index_of(name: str) -> int:
+    for at in 0..<settings.parameter_total():
+        if settings.name_of(at) == name:
+            return at
+    return 0

@@ -14,7 +14,7 @@ from photo_library import PhotoLibrary
 from library_pane import LibraryPane
 from viewer import Viewer
 from properties import PropertiesPane
-from recipes_pane import RecipesPane
+from presets_pane import PresetsPane
 from modes import ModeBar
 import modes
 import theme
@@ -40,11 +40,12 @@ pub class Panels:
     pub let library_pane: LibraryPane
     pub let viewer: Viewer
     pub let properties: PropertiesPane
-    pub let recipes: RecipesPane
+    pub let presets: PresetsPane
     pub let dock: DStack
     pub let mode_bar: ModeBar
     ## The mode shown (modes.luc).
     pub var mode: int = -1
+    var mode_before: int = -1
     let status: Text
     let palette: CommandPalette
     ## Develops edited photos' previews and thumbnails again.
@@ -76,11 +77,17 @@ pub class Panels:
         self.palette = CommandPalette(self.actions.all, font = font)
         self.session = DevelopSession(self.library, self.properties.develop, self.viewer, self.library_pane, self.rerenderer)
         self.session.on_status = self.tell
-        self.recipes = RecipesPane(self.library, font)
-        self.recipes.current = self.session.recipe_text
-        self.recipes.on_status = self.tell
-        self.recipes.on_apply = func (name: str, text: str) -> unit!:
-            self.session.apply_recipe(self.library_pane.selection(), name, text)
+        self.presets = PresetsPane(self.library, font)
+        self.presets.current = self.session.recipe_text
+        self.presets.on_status = self.tell
+        self.presets.on_apply = func (name: str, text: str, id: int) -> unit!:
+            let picked = self.library_pane.selection()
+            self.session.apply_preset(picked, name, text)
+            # The photos remember the preset (0: a start or a film look), whose
+            # parameters the Library mode then shows.
+            if picked.length > 0:
+                self.library.set_marks(picked, "preset", id)
+                self.properties.show(self.library_pane.grid.selected_index(), picked.length)
         self.mode_bar = ModeBar(font)
         self.mode_bar.on_pick = self.set_mode
         self.library_pane.on_pick = self.show_selection
@@ -212,17 +219,21 @@ pub class Panels:
     func arrange(self, mode: int) -> unit!:
         self.mode = mode
         self.mode_bar.choose(mode)
-        for panel in [self.library_pane.panel, self.recipes.panel]:
+        for panel in [self.library_pane.panel, self.presets.panel]:
             if self.dock.contains(panel):
                 self.dock.remove(panel)
+        let was_strip = self.mode_before >= 0 and self.mode_before != modes.library
+        if (mode != modes.library) != was_strip or self.mode_before < 0:
+            self.library_pane.set_strip(mode != modes.library)
+        self.mode_before = mode
         if mode == modes.library:
             self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.left)
             self.dock.set_fraction(self.library_pane.panel, 0.36)
-            self.dock.add(self.recipes.panel, self.properties.panel, DockPosition.top)
-            self.dock.set_fraction(self.recipes.panel, 0.4)
+            self.dock.add(self.presets.panel, self.properties.panel, DockPosition.top)
+            self.dock.set_fraction(self.presets.panel, 0.4)
         else:
             self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.bottom)
-            self.dock.set_fraction(self.viewer.panel, 0.8)
+            self.dock.set_fraction(self.viewer.panel, 0.84)
         self.properties.set_mode(mode)
         for (at, command) in self.actions.modes.indexed():
             command.set_checked(at == mode)
@@ -266,7 +277,7 @@ pub class Panels:
         self.session.forget()
         self.unshown = -1
         self.library_pane.show_library()
-        self.recipes.show()
+        self.presets.show()
         self.show_selection(-1)
         self.show_library_title()
         self.greet()
@@ -414,6 +425,14 @@ pub class Panels:
         self.session.open(id, index.settings(lead))
         self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), index.width(lead), index.height(lead))
 
+    ## Select the photo at `position` alone and show it.
+    pub func show_photo(self, position: int) -> unit!:
+        let grid = self.library_pane.grid
+        if position < 0 or position >= grid.item_count():
+            return
+        grid.select(position)
+        self.show_selection(position)
+
     ## An Aspect menu value as width over height: -1 is the photo's own, 0 free.
     func aspect_ratio(self, value: float) -> float:
         if value >= 0.0:
@@ -479,5 +498,5 @@ pub class Panels:
         self.library_pane.close()
         self.viewer.close()
         self.properties.close()
-        self.recipes.close()
+        self.presets.close()
         self.library.close()

@@ -9,6 +9,7 @@ from photo_library import PhotoLibrary
 from actions import Actions
 from develop_controls import DevelopControls
 import modes
+import presets
 
 pub class PropertiesPane:
     pub let panel: Panel
@@ -21,6 +22,8 @@ pub class PropertiesPane:
     let captured: Text
     let file: Text
     let marks: Text
+    ## The photo's preset, over its exposed parameters in Library mode.
+    let preset: Text
     ## Stands in for the develop controls while no photo is selected.
     let unselected: Text
     ## The ratings, flags and labels, shown with a photo to give them to.
@@ -40,6 +43,7 @@ pub class PropertiesPane:
         self.captured = Text("", font = font, muted = true)
         self.file = Text("", font = font, muted = true)
         self.marks = Text("", font = font)
+        self.preset = Text("", font = font, muted = true)
         self.develop = DevelopControls(font)
         self.histogram = Histogram()
         var stars: list[Widget] = []
@@ -55,7 +59,7 @@ pub class PropertiesPane:
         self.marking = VStack([Rule(), Text("MARKS", font = font, muted = true), self.marks, HStack(stars, spacing = 4.0), flags,
                                HStack(labels, spacing = 4.0)], spacing = 6.0)
         self.facts = VStack([self.camera, self.exposure, self.captured, self.file, Rule()], spacing = 6.0)
-        let rows = VStack([self.histogram, self.title, self.facts, self.unselected, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 6.0)
+        let rows = VStack([self.histogram, self.title, self.facts, self.unselected, self.preset, self.develop.body, self.marking, Spacer()], spacing = 6.0, padding = 6.0)
         self.panel = Panel("Properties", ScrollView(rows), minimum = Size(260.0, 200.0), closable = false, id = "properties")
         self.show(-1, 0)
 
@@ -77,6 +81,8 @@ pub class PropertiesPane:
         let chosen = at >= 0
         self.selected_photo = chosen
         self.show_parts()
+        if chosen:
+            self.show_preset(at)
         if not chosen:
             self.title.set_text("No photo selected")
             self.marks.set_text("")
@@ -102,19 +108,30 @@ pub class PropertiesPane:
         let stars = "★".repeat(index.rating(at)) if index.rating(at) > 0 else "No rating"
         self.marks.set_text(f"{stars}  {flag}".trim())
 
+    ## The photo at `at`'s preset: its name, and the parameters the Library
+    ## mode shows (Exposure and White Balance without one).
+    func show_preset(self, at: int) -> unit!:
+        let saved = self.library.presets
+        let found = saved.position_of(self.library.index.preset(at))
+        self.preset.set_text(f"PRESET · {saved.name(found).upper()}" if found >= 0 else "NO PRESET")
+        let exposed = saved.exposed(found) if found >= 0 else presets.default_exposed
+        self.develop.exposed = exposed.split("|")
+        if self.mode == modes.library:
+            self.develop.show_mode(modes.library)
+
     ## Show mode `mode`'s parts: the facts and marks in Library, the mode's
     ## controls in the others.
     pub func set_mode(self, mode: int) -> unit!:
         self.mode = mode
-        if mode != modes.library:
-            self.develop.show_mode(mode)
+        self.develop.show_mode(mode)
         self.show_parts()
 
     func show_parts(self) -> unit!:
         let chosen = self.selected_photo
         let library = self.mode == modes.library
         self.unselected.layout().set_visible(not chosen)
-        self.develop.body.layout().set_visible(chosen and not library)
+        self.develop.body.layout().set_visible(chosen)
+        self.preset.layout().set_visible(chosen and library)
         self.marking.layout().set_visible(chosen and library)
         self.facts.layout().set_visible(chosen and library)
         self.histogram.layout().set_visible(chosen)

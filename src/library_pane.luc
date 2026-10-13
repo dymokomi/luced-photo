@@ -3,9 +3,11 @@
 ## height. Thumbnails stream in from the loader's
 ## threads for the cells on screen and a few rows around them; pictures far
 ## from the screen are let go, so a library of any size costs a screenful.
-## An empty library says how to fill it, with the import commands at hand; a
-## filter that hides every photo says so.
-from luce_ui.ui import ThumbnailGrid, Image, Slider, Text, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, Widget
+## The search field over the grid shows only photos whose name, camera, lens,
+## capture date or preset holds what is typed. An empty library says how to
+## fill it, with the import commands at hand; a filter or search that hides
+## every photo says so.
+from luce_ui.ui import ThumbnailGrid, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, Widget
 from interop import Connection
 from photo_library import PhotoLibrary
 from thumbs import Loader
@@ -24,6 +26,10 @@ pub class LibraryPane:
     let empty_hint: Text
     let empty_buttons: HStack
     let size: Slider
+    pub let search: TextField
+    let search_row: HStack
+    ## The thumbnail size the Library mode keeps, while a filmstrip shows smaller.
+    var library_cell: float = 160.0
     ## Grid items whose thumbnails were asked for and have not arrived.
     var requested: set[int] = {}
     ## The pictures loaded, by photo id: they outlive a refresh, which may move
@@ -83,7 +89,12 @@ pub class LibraryPane:
         self.empty_buttons = HStack(buttons, spacing = 8.0)
         self.empty = VStack([HStack([Spacer(), self.empty_title, Spacer()]), HStack([Spacer(), self.empty_hint, Spacer()]), self.empty_buttons],
                             spacing = 10.0, padding = 24.0)
-        let content = VStack([self.empty, self.grid], spacing = 0.0)
+        self.search = TextField("", font = font, placeholder = "Search name, camera, lens, date, preset", cells = 48.0)
+        self.connections.append(self.search.on_change(func (text: str) -> unit!:
+            self.library.set_search(text)
+            self.refresh()))
+        self.search_row = HStack([self.search], padding = 4.0)
+        let content = VStack([self.search_row, self.empty, self.grid], spacing = 0.0)
         content.layout().set_flex()
         self.panel = Panel("Library", content, minimum = Size(240.0, 200.0), closable = false, footer = bar, id = "library")
         self.refresh()
@@ -112,8 +123,22 @@ pub class LibraryPane:
             self.empty_title.set_text("This library has no photos yet")
             self.empty_hint.set_text("Import a folder or photos, or drop them here.")
         else:
-            self.empty_title.set_text("No photos match the filter")
-            self.empty_hint.set_text("Filter › All Photos shows them all.")
+            self.empty_title.set_text("No photos match the filter or search")
+            self.empty_hint.set_text("Filter › All Photos and an empty search show them all.")
+
+    ## As the Library mode's grid (`strip` false), with the search and its
+    ## thumbnail size, or as a filmstrip along the bottom of the other modes:
+    ## one row of small thumbnails, no search.
+    pub func set_strip(self, strip: bool) -> unit!:
+        self.search_row.layout().set_visible(not strip)
+        if strip:
+            self.library_cell = self.grid.cell_size()
+            self.grid.set_cell_size(96.0)
+        else:
+            self.grid.set_cell_size(self.library_cell)
+        let lead = self.grid.selected_index()
+        if lead >= 0:
+            self.grid.reveal(lead)
 
     ## Show another library: no picture loaded for this one's ids is kept.
     pub func show_library(self) -> unit!:

@@ -162,6 +162,8 @@ pub class DevelopControls:
     pub var on_shown: func() -> unit!? = none
     ## The mode whose sections show (modes.luc).
     var mode: int = 1
+    ## What the Library mode shows: the photo's preset's exposed parameters.
+    pub var exposed: list[str] = []
     ## Under the stage's sections: an essay about the stage, then one about
     ## what is chosen in it (the stock, the process), each under its title.
     let about: VStack
@@ -224,9 +226,6 @@ pub class DevelopControls:
                                        decimals = settings.decimals_of(at), slider = true, gradient = gradient_for(name)))
         if title == "White Balance":
             specs.append(ParameterSpec(name = "as_shot", label = "As Shot", kind = ParameterKind.button))
-        if title in ["White Balance", "Lens", "Filter"]:
-            specs.insert(1, ParameterSpec(name = "stage_on", label = "On", kind = ParameterKind.toggle, resettable = false,
-                                          doc = f"Off, the light passes the {title.lower()} by"))
         if title == "Output":
             var outputs: list[str] = []
             for at in 0..<recipe.output_total():
@@ -300,6 +299,10 @@ pub class DevelopControls:
         if title == "View":
             specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
+        # The switch first, under the heading.
+        if title in ["White Balance", "Lens", "Filter"]:
+            specs.insert(1, ParameterSpec(name = "stage_on", label = "On", kind = ParameterKind.toggle, resettable = false,
+                                          doc = f"Off, the light passes the {title.lower()} by"))
         return specs
 
     ## The widget under a section: the curve editor, or the tone wheels.
@@ -564,7 +567,16 @@ pub class DevelopControls:
         self.mode = mode
         for section in self.sections:
             var shown = false
-            if section.stage == output_section:
+            # The Library mode: only the exposed rows, in their sections.
+            let library = mode == modes.library
+            for (index, name) in section.names.indexed():
+                if name != section.title:
+                    let hidden = library and not (name in self.exposed)
+                    section.panel.set_hidden(index, hidden)
+                    shown = shown or (library and not hidden)
+            if library:
+                shown = shown and (section.stage < 0 or self.look.has_stage(section.stage))
+            elif section.stage == output_section:
                 shown = mode == modes.printing
             elif section.stage >= 0 and modes.of_stage(section.stage) == mode:
                 shown = self.look.has_stage(section.stage) or optional(section.stage)

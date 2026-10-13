@@ -2,7 +2,8 @@
 ## in Properties (Capture the camera and the film, Develop the chemistry, Print
 ## the Output and its stages, View the display and the frame); the Output menu
 ## swaps Print's stages; a switched-off Lens still shows, to switch on; the
-## window draws in every mode. Prints PASS or traps.
+## Library mode shows the exposed parameters alone (Exposure and White Balance
+## without a preset); the window draws in every mode. Prints PASS or traps.
 from app import LucedPhoto
 from luce_std import files, paths
 import modes
@@ -17,6 +18,13 @@ pub func main(arguments: list[str]) -> int!:
     let panels = photo.panels
     let controls = panels.properties.develop
     expect(panels.mode == modes.library, "the app opens in Library")
+    controls.exposed = ["exposure", "temperature", "tint"]
+    controls.show_mode(modes.library)
+    expect(controls.section_shown("Exposure") and controls.section_shown("White Balance"), "Library shows the exposure and white balance")
+    expect(not controls.section_shown("Film") and not controls.section_shown("Develop"), "Library shows nothing else")
+    controls.exposed = ["film_grain"]
+    controls.show_mode(modes.library)
+    expect(controls.section_shown("Film") and not controls.section_shown("Exposure"), "an exposed grain shows the Film section")
     panels.set_mode(modes.capture)
     expect(controls.section_shown("Film") and controls.section_shown("Exposure"), "Capture shows the film and the exposure")
     expect(controls.section_shown("Lens") and not controls.look.has_stage(3), "Capture shows the Lens, switched off")

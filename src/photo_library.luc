@@ -9,8 +9,8 @@ from photo_index import PhotoIndex
 import photo_index
 from importer import Importer
 import importer
-from recipes import RecipeList
-import recipes
+from presets import PresetList
+import presets
 
 ## An import was asked for while another runs.
 pub let busy = ErrorCode.package(20)
@@ -23,20 +23,23 @@ pub class PhotoLibrary:
     pub var root: str
     pub var store: prism.Store
     pub var index: PhotoIndex
-    ## The develop recipes, by name; read again after every change.
-    pub var recipes: RecipeList
+    ## The develop presets, by name; read again after every change.
+    pub var presets: PresetList
     var running: Importer? = none
     ## The filter the index applies (PhotoIndex.filter).
     var minimum_rating: int = 0
     var flags: int = 0
     var label: int = 0
+    ## What the search field holds: photos whose name, camera, lens, date or
+    ## preset's name hold it (ignoring case).
+    var search: str = ""
 
     pub func init(self, root: str) -> unit!:
         self.root = root
         library.ensure(root)
         self.store = prism.Store.open(library.catalog_path(root))
         self.index = photo_index.read_index(self.store)
-        self.recipes = recipes.read_presets(self.store)
+        self.presets = presets.read_presets(self.store)
 
     ## Close this library and open the bundle at `root` in its place, made
     ## when it is missing; the filter stays. Not while an import runs.
@@ -52,12 +55,12 @@ pub class PhotoLibrary:
         self.store = store
         self.root = root
         self.reload()
-        self.recipes = recipes.read_presets(self.store)
+        self.presets = presets.read_presets(self.store)
 
     ## Read the catalog again, keeping the filter.
     pub func reload(self) -> unit!:
         self.index = photo_index.read_index(self.store)
-        self.index.filter(self.minimum_rating, self.flags, self.label)
+        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets())
 
     ## Show only photos with at least `minimum_rating` stars, flags `flags` (0
     ## all, 1 picked, -1 rejected, 2 all but rejected) and label `label` (0 any).
@@ -65,7 +68,23 @@ pub class PhotoLibrary:
         self.minimum_rating = minimum_rating
         self.flags = flags
         self.label = label
-        self.index.filter(minimum_rating, flags, label)
+        self.index.filter(minimum_rating, flags, label, self.search, self.searched_presets())
+
+    ## Show only photos matching `text` (search_field), as well as the filter.
+    pub func set_search(self, text: str) -> unit!:
+        self.search = text.trim()
+        self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets())
+
+    ## The ids of the presets whose names hold the search.
+    func searched_presets(self) -> list[int]:
+        var out: list[int] = []
+        if self.search == "":
+            return out
+        let wanted = self.search.lower()
+        for at in 0..<self.presets.count():
+            if wanted in self.presets.name(at).lower():
+                out.append(self.presets.id(at))
+        return out
 
     # mark: importing ===========================================================================
 
@@ -109,8 +128,9 @@ pub class PhotoLibrary:
 
     # mark: marks ===============================================================================
 
-    ## Set `name` ("rating", "flag" or "label") to `value` on the photos at
-    ## `positions` of the index, in the catalog and in the index.
+    ## Set `name` ("rating", "flag", "label" or "preset", a preset's id or 0)
+    ## to `value` on the photos at `positions` of the index, in the catalog and
+    ## in the index.
     pub func set_marks(self, positions: list[int], name: str, value: int) -> unit!:
         var ids: list[int] = []
         for at in positions:
@@ -122,6 +142,8 @@ pub class PhotoLibrary:
                     self.index.set_rating(at, value)
                 "flag":
                     self.index.set_flag(at, value)
+                "preset":
+                    self.index.set_preset(at, value)
                 _:
                     self.index.set_label(at, value)
 
@@ -132,21 +154,26 @@ pub class PhotoLibrary:
         if at >= 0:
             self.index.set_settings(at, text)
 
-    # mark: recipes =============================================================================
+    # mark: presets =============================================================================
 
-    ## Keep settings `text` as the recipe `name` (replacing one of that name); its id.
-    pub func save_recipe(self, name: str, text: str) -> int!:
-        let id = recipes.save_recipe(self.store, self.recipes, name, text)
-        self.recipes = recipes.read_presets(self.store)
+    ## Keep settings `text` as the preset `name` (replacing one of that name),
+    ## showing `exposed` ("|" between) in the Library mode; its id.
+    pub func save_preset(self, name: str, text: str, exposed: str) -> int!:
+        let id = presets.save_preset(self.store, self.presets, name, text, exposed)
+        self.presets = presets.read_presets(self.store)
         return id
 
-    pub func rename_recipe(self, id: int, name: str) -> unit!:
-        recipes.rename_recipe(self.store, id, name)
-        self.recipes = recipes.read_presets(self.store)
+    pub func set_exposed(self, id: int, exposed: str) -> unit!:
+        presets.set_exposed(self.store, id, exposed)
+        self.presets = presets.read_presets(self.store)
 
-    pub func delete_recipe(self, id: int) -> unit!:
-        recipes.delete_recipe(self.store, id)
-        self.recipes = recipes.read_presets(self.store)
+    pub func rename_preset(self, id: int, name: str) -> unit!:
+        presets.rename_preset(self.store, id, name)
+        self.presets = presets.read_presets(self.store)
+
+    pub func delete_preset(self, id: int) -> unit!:
+        presets.delete_preset(self.store, id)
+        self.presets = presets.read_presets(self.store)
 
     pub func close(self):
         if let current = self.running:

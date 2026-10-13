@@ -3,6 +3,7 @@
 from luce_ui.ui import Application, Font
 from panels import Panels
 import theme
+import modes
 from luce_std import crash
 
 ## The version crash reports carry; keep it equal to package.prisma's.
@@ -19,7 +20,7 @@ pub class LucedPhoto:
         crash.enable("luced-photo", version)
         let font = Font()
         self.panels = Panels(font, root)
-        self.app = Application(self.panels.body, title = "Luced Photo", width = 1500, height = 920, theme = theme.editor_theme())
+        self.app = Application(self.panels.body, title = "Luced Photo", width = 1500, height = 920, theme = theme.editor_theme(modes.color(modes.library)))
         self.panels.app = self.app
         self.panels.show_library_title()
         self.app.set_commands(self.panels.actions.all)

@@ -7,7 +7,7 @@ import memory
 from luce_prism import prism
 import catalog
 from catalog import Photo
-from luce_std.collections import List
+from luce_std.collections import List, Buffer
 
 pub struct PhotoIndex:
     var rows: catalog.Rows
@@ -18,6 +18,9 @@ pub struct PhotoIndex:
     var minimum_rating: i64
     var flags: i64
     var wanted_label: i64
+    ## The search, lower case ("" none), and the presets whose names hold it.
+    var search: Buffer
+    var search_presets: List[i64]
 
     ## How many photos the filter shows.
     pub func count() -> i64:
@@ -87,6 +90,8 @@ pub struct PhotoIndex:
         return self.photo(at).flag
     pub func label(at: i64) -> i64:
         return self.photo(at).label
+    pub func preset(at: i64) -> i64:
+        return self.photo(at).preset
     pub func edited(at: i64) -> bool:
         return self.photo(at).edited
     ## The develop settings' text form ("" when untouched).
@@ -106,19 +111,42 @@ pub struct PhotoIndex:
         self.stored(at).flag = flag
     pub func set_label(at: i64, label: i64):
         self.stored(at).label = label
+    pub func set_preset(at: i64, preset: i64):
+        self.stored(at).preset = preset
     pub func set_settings(at: i64, settings: str) -> !:
         let kept = try self.rows.pool.keep_text(settings.bytes)
         self.stored(at).settings = kept
         self.stored(at).edited = kept.length > 0
 
     ## Show only photos with at least `minimum_rating` stars, the flags `flags`
-    ## selects (0 every photo, 1 picked, -1 rejected, 2 all but rejected) and label
-    ## `label` (0 any), ordered by capture time.
-    pub func filter(minimum_rating: i64, flags: i64, label: i64) -> !:
+    ## selects (0 every photo, 1 picked, -1 rejected, 2 all but rejected), label
+    ## `label` (0 any), and holding `search` (ignoring case) in their name,
+    ## camera, lens or capture date, or given one of `presets`; ordered by
+    ## capture time.
+    pub func filter(minimum_rating: i64, flags: i64, label: i64, search: str, presets: const i64[]) -> !:
         self.minimum_rating = minimum_rating
         self.flags = flags
         self.wanted_label = label
+        self.search.clear()
+        for byte in search.bytes:
+            try self.search.put_byte(byte + 32 if byte >= 'A' and byte <= 'Z' else byte)
+        self.search_presets.clear()
+        for id in presets:
+            try self.search_presets.append(id)
         try self.arrange()
+
+    ## Whether `photo` holds the search.
+    func matches(photo: const Photo*) -> bool:
+        let wanted = self.search.text()
+        if wanted.length == 0:
+            return true
+        for id in self.search_presets.view():
+            if photo.preset == id:
+                return true
+        for field in [photo.name, photo.make, photo.model, photo.lens, photo.captured, photo.kind]:
+            if holds(field, wanted):
+                return true
+        return false
 
     func arrange() -> !:
         self.order.clear()
@@ -129,12 +157,16 @@ pub struct PhotoIndex:
                 continue
             if self.wanted_label != 0 and photo.label != self.wanted_label:
                 continue
+            if not self.matches(&photo):
+                continue
             try self.order.append((u32)at)
         try sort_by_capture(self.order.items(), self.rows.photos.view())
 
     pub func close():
         self.rows.close()
         self.order.destroy()
+        self.search.destroy()
+        self.search_presets.destroy()
 
 pub let photo_index_type: interop.Type[PhotoIndex] = interop.Type[PhotoIndex]("PhotoIndex", PhotoIndex.close, closeable = true)
 
@@ -189,8 +221,8 @@ pub func read_index(store: interop.Reference[prism.Store]) -> interop.Reference[
 ## Set field `name` ("rating", "flag" or "label") to `value` on photos `ids` in
 ## the catalog, in one commit.
 pub func set_marks(store: interop.Reference[prism.Store], ids: const i64[], name: str, value: i64) -> !:
-    if not (name == "rating" or name == "flag" or name == "label"):
-        error(prism.invalid, "only a rating, flag or label is set this way")
+    if not (name == "rating" or name == "flag" or name == "label" or name == "preset"):
+        error(prism.invalid, "only a rating, flag, label or preset is set this way")
     let held = try store.get()
     var batch = try catalog.Batch.begin(held)
     defer batch.close()
@@ -205,6 +237,26 @@ pub func save_settings(store: interop.Reference[prism.Store], id: i64, settings:
     defer batch.close()
     try batch.set_settings(id, settings)
     try batch.commit()
+
+## Whether `text` holds `wanted` (lower case), ignoring ASCII case.
+func holds(text: str, wanted: str) -> bool:
+    let a = text.bytes
+    let b = wanted.bytes
+    if b.length > a.length:
+        return false
+    for start in 0..=(a.length - b.length):
+        var all = true
+        for at in 0..<b.length:
+            let byte = a[start + at]
+            if (byte + 32 if byte >= 'A' and byte <= 'Z' else byte) != b[at]:
+                all = false
+                break
+        if all:
+            return true
+    return false
+
+test "a search holds ignoring case":
+    assert(holds("LEICA M11-D", "m11") and holds("Summilux", "lux") and not holds("Leica", "nikon") and holds("x", ""))
 
 test "photos sort by capture time, then id":
     var photos: Photo[4]

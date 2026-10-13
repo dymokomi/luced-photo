@@ -1,5 +1,5 @@
-## Recipes round-trip through a fresh catalog: save, save again by the same name,
-## rename, delete, and read back after reopening. The catalog is made in the folder
+## Presets round-trip through a fresh catalog: save, save again by the same name,
+## rename, change what the Library shows, delete, and read back after reopening. The catalog is made in the folder
 ## given, or in a temporary folder under build/ that is removed after. Prints PASS
 ## or traps.
 import c
@@ -8,10 +8,10 @@ import strings
 from luce_prism import prism
 from luce_std import files
 from luce_std import paths
-import recipes
+import presets
 
-func names(store: interop.Reference[prism.Store]) -> interop.Reference[recipes.RecipeList]!:
-    return try recipes.read_presets(store)
+func names(store: interop.Reference[prism.Store]) -> interop.Reference[presets.PresetList]!:
+    return try presets.read_presets(store)
 
 pub func main(arguments: str[]) -> i32!:
     if arguments.length > 1:
@@ -35,16 +35,17 @@ func check(folder: str) -> !:
     var store = try prism.Store.open(path.value)
     var list = try names(store)
     assert((try list.get()).count() == 0)
-    let warm = try recipes.save_recipe(store, list, "Warm", "temperature=6500")
+    let warm = try presets.save_preset(store, list, "Warm", "temperature=6500", presets.default_exposed)
     list.release()
     list = try names(store)
-    let mono = try recipes.save_recipe(store, list, "mono", "bw=1")
+    let mono = try presets.save_preset(store, list, "mono", "bw=1", "exposure")
     list.release()
     list = try names(store)
     # The same name, in another case, replaces the name and settings, keeping the id.
-    let again = try recipes.save_recipe(store, list, "WARM", "temperature=7000;saturation=10")
+    let again = try presets.save_preset(store, list, "WARM", "temperature=7000;saturation=10", "exposure|saturation")
     assert(again == warm and mono != warm)
-    try recipes.rename_recipe(store, mono, "Black and White")
+    try presets.rename_preset(store, mono, "Black and White")
+    try presets.set_exposed(store, mono, "exposure|film_grain")
     list.release()
     (try store.get()).close()
     store.release()
@@ -54,14 +55,16 @@ func check(folder: str) -> !:
     assert(read.count() == 2)
     assert(read.name(0) == "Black and White" and read.settings(0) == "bw=1")
     assert(read.name(1) == "WARM" and read.settings(1) == "temperature=7000;saturation=10")
-    try recipes.delete_recipe(store, warm)
+    assert(read.exposed(0) == "exposure|film_grain" and read.exposed(1) == "exposure|saturation")
+    assert(read.position_of(mono) == 0 and read.position_of(999) == -1)
+    try presets.delete_preset(store, warm)
     list.release()
     list = try names(store)
     assert((try list.get()).count() == 1 and (try list.get()).id(0) == mono)
-    # The next recipe takes a fresh id, not the deleted one's.
-    let fresh = try recipes.save_recipe(store, list, "Fresh", "")
+    # The next preset takes a fresh id, not the deleted one's.
+    let fresh = try presets.save_preset(store, list, "Fresh", "", "")
     assert(fresh != warm and fresh != mono)
     list.release()
     (try store.get()).close()
     store.release()
-    print("PASS recipes save, replace, rename, delete and reopen")
+    print("PASS presets save, replace, rename, expose, delete and reopen")

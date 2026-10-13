@@ -55,6 +55,8 @@ pub struct Photo:
     pub var rating: i64
     pub var flag: i64
     pub var label: i64
+    ## The preset given it last (presets.lucb's id), 0 none.
+    pub var preset: i64
     pub var edited: bool
     pub var settings: str
 
@@ -142,11 +144,12 @@ pub struct Batch:
         try self.integer(path, "rating", photo.rating)
         try self.integer(path, "flag", photo.flag)
         try self.integer(path, "label", photo.label)
+        try self.integer(path, "preset", photo.preset)
         try self.boolean(path, "edited", photo.edited)
         try self.text(path, "settings", photo.settings)
         self.count += 1
 
-    ## Set one integer field (`rating`, `flag` or `label`) of photo `id`; a photo
+    ## Set one integer field (`rating`, `flag`, `label` or `preset`) of photo `id`; a photo
     ## no longer in the catalog is passed over.
     pub func set_mark(id: i64, name: str, value: i64) -> !:
         try photo_path(id, &self.path)
@@ -239,7 +242,7 @@ func collect(context: void*?, view: const prism.RowView*) -> !:
         aperture = view.number("aperture") else 0.0, exposure = view.number("exposure") else 0.0,
         shutter = try kept(into, view, "shutter"), iso = view.integer("iso") else 0,
         bias = view.number("bias") else 0.0, rating = view.integer("rating") else 0,
-        flag = view.integer("flag") else 0, label = view.integer("label") else 0,
+        flag = view.integer("flag") else 0, label = view.integer("label") else 0, preset = view.integer("preset") else 0,
         edited = view.boolean("edited") else false, settings = try kept(into, view, "settings")))
 
 ## Every photo in the catalog, in the order they were added.

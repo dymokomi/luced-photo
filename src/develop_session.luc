@@ -249,7 +249,7 @@ pub class DevelopSession:
         return parts.join(";")
 
     ## Stack recipe `name`, settings `text`, on the photos at `positions`.
-    pub func apply_recipe(self, positions: list[int], name: str, text: str) -> unit!:
+    pub func apply_preset(self, positions: list[int], name: str, text: str) -> unit!:
         if positions.length == 0:
             self.tell("Select photos to apply a recipe to.")
             return
