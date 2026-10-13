@@ -20,16 +20,14 @@
 ##
 ## The controls edit a Look (luce-develop's settings) and call `on_change` after
 ## every edit; `show` loads a photo's settings without calling it.
-from luce_ui.ui import VStack, HStack, Text, Paragraph, Rule, Font, Widget, ParameterPanel, ParameterSpec, ParameterKind, CurveEditor, ColorWheel, Button, Size
+from luce_ui.ui import VStack, HStack, Text, Font, Widget, ParameterPanel, ParameterSpec, ParameterKind, CurveEditor, ColorWheel, Button, Size
 from luce_ui import ui
 from interop import Connection
 from luce_develop.settings import Look, look
 from luce_develop import settings
 from luce_develop import film
 from luce_develop import recipe
-from luce_develop import looks
 from luce_std import math
-import essays
 import modes
 
 ## The label column every section shares, so all the sliders line up.
@@ -164,11 +162,6 @@ pub class DevelopControls:
     var mode: int = 1
     ## What the Library mode shows: the photo's preset's exposed parameters.
     pub var exposed: list[str] = []
-    ## Under the stage's sections: an essay about the stage, then one about
-    ## what is chosen in it (the stock, the process), each under its title.
-    let about: VStack
-    let about_titles: list[Text]
-    let about_texts: list[Paragraph]
 
     pub func init(self, font: Font) -> unit!:
         self.look = look("")
@@ -185,17 +178,6 @@ pub class DevelopControls:
             widgets.append(section.panel)
             if let extra = section.extra:
                 widgets.append(extra)
-        self.about_titles = []
-        self.about_texts = []
-        var about: list[Widget] = [Rule()]
-        for _ in 0..<3:
-            let title = Text("", font = font)
-            let text = Paragraph("", font = font, muted = true)
-            self.about_titles.append(title)
-            self.about_texts.append(text)
-            about = about + [title, text]
-        self.about = VStack(about, spacing = 8.0, padding = 6.0)
-        widgets.append(self.about)
         self.body = VStack(widgets, spacing = 0.0)
         self.show_values()
 
@@ -615,53 +597,7 @@ pub class DevelopControls:
                 for (index, name) in section.names.indexed():
                     if name != section.title and name != "stage_on":
                         section.panel.set_enabled(index, on)
-        self.show_essays(self.subject(mode))
         self.show_extras()
-
-    ## The stage a mode's essays are about: the film, its development, what
-    ## the output does with it; none for Library and View.
-    func subject(self, mode: int) -> int:
-        if mode == modes.capture:
-            return recipe.key_stage("film")
-        if mode == modes.develop:
-            return recipe.key_stage("develop")
-        if mode == modes.printing:
-            for key in ["paper", "lightbox", "print", "scan"]:
-                let stage = recipe.key_stage(key)
-                if self.look.has_stage(stage):
-                    return stage
-        return -1
-
-    ## The essays about stage `stage` (-1: none) and what is chosen in it: the
-    ## stock; the process, and bleach bypass for a color negative or
-    ## cross-processing for a slide in C-41.
-    func show_essays(self, stage: int) -> unit!:
-        var keys = ["", "", ""]
-        if stage >= 0:
-            keys[0] = f"stage/{recipe.stage_key(stage)}"
-            let name = recipe.stage_name(stage)
-            if name == "Film":
-                keys[1] = f"stock/{essays.slug(film.stock_name(self.stock()))}"
-            elif name == "Print":
-                keys[1] = "print/technicolor-dye-transfer" if self.look.get("print_material") > 0.5 else "print/kodak-vision-2383"
-            elif name == "Paper":
-                keys[1] = f"paper/{essays.slug(film.paper_name(int(self.look.get("paper_stock"))))}"
-            elif name == "Develop":
-                keys[1] = f"process/{essays.slug(film.process_name(self.process()))}"
-                let kind = film.stock_kind(self.stock())
-                if kind == 1 and film.process_name(self.process()) == "C-41":
-                    keys[2] = "process/cross-processing"
-                elif kind == 0:
-                    keys[2] = "process/bleach-bypass"
-        var any = false
-        for at in 0..<3:
-            let title = essays.essay_title(keys[at])
-            self.about_titles[at].set_text(title.upper())
-            self.about_texts[at].set_text(essays.essay_text(keys[at]))
-            self.about_titles[at].layout().set_visible(title != "")
-            self.about_texts[at].layout().set_visible(title != "")
-            any = any or title != ""
-        self.about.layout().set_visible(any)
 
     ## The stock chosen (0-based).
     func stock(self) -> int!:
@@ -716,18 +652,3 @@ pub class DevelopControls:
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()
-
-test "every stage a mode shows, stock and process has its essay":
-    for key in ["film", "develop", "scan", "print", "lightbox", "paper"]:
-        assert(essays.essay_title(f"stage/{key}") != "")
-    for stock in 0..<film.stock_count():
-        assert(essays.essay_title(f"stock/{essays.slug(film.stock_name(stock))}") != "")
-    for process in 0..<film.process_total():
-        assert(essays.essay_title(f"process/{essays.slug(film.process_name(process))}") != "")
-    assert(essays.slug("Kodak Vision3 500T 5219") == "kodak-vision3-500t-5219")
-    for mode in 0..<recipe.mode_total():
-        assert(essays.essay_title(f"mode/{essays.slug(recipe.mode_name(mode))}") != "")
-    for paper in 0..<film.paper_total():
-        assert(essays.essay_title(f"paper/{essays.slug(film.paper_name(paper))}") != "")
-    for picture in 0..<looks.count():
-        assert(essays.essay_title(f"look/{essays.slug(looks.name(picture))}") != "")

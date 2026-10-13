@@ -2,21 +2,20 @@
 ## (Television, Cinema, Slide, Black & White, Super Panavision 70…: a chain of
 ## stages and a stock), the library's saved presets (a photo's settings, every
 ## stage's values), and the looks of particular pictures luce-develop documents
-## ("Film · Munich (2005)"). A click gives the row to the selected photos and
-## shows its essay below the list (develop_session.luc says how). A saved
+## ("Film · Munich (2005)"). A click gives the row to the selected photos
+## (develop_session.luc says how). A saved
 ## preset also names the parameters the Library mode shows for its photos
 ## (expose_dialog.luc): asked when it is saved, changed from its menu. The
 ## footer saves the developed photo's settings as a new preset, saves them over
 ## the chosen one, renames it and deletes it; the row's menu (right-click) does
 ## the same for the row pressed. Presets live in the catalog (presets.lucb), so
 ## they travel with the library.
-from luce_ui.ui import Text, Paragraph, Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
+from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
 from interop import Connection
 from photo_library import PhotoLibrary
 from expose_dialog import ExposeDialog
 import presets
 from luce_develop import looks
-import essays
 import preset_marks
 from luce_develop import recipe
 from luce_develop import settings
@@ -35,9 +34,6 @@ pub class PresetsPane:
     let expose_command: Command
     pub let expose: ExposeDialog
     let font: Font
-    ## The clicked row's essay.
-    let about_title: Text
-    let about: Paragraph
     var connections: list[Connection] = []
     ## What the prompt asks for: "save" a new preset's name or "rename" the
     ## preset with id `renaming`.
@@ -81,12 +77,7 @@ pub class PresetsPane:
         self.connections.append(self.prompt.on_submit(self.submitted))
         self.confirm = ConfirmDialog(font = font)
         self.connections.append(self.confirm.on_choose(self.chosen_delete))
-        self.about_title = Text("", font = font)
-        self.about = Paragraph("", font = font, muted = true)
-        let essay = VStack([self.about_title, self.about], spacing = 6.0, padding = 6.0)
-        self.about_title.layout().set_visible(false)
-        self.about.layout().set_visible(false)
-        let content = VStack([self.row_menu, essay, self.prompt, self.confirm, self.expose.dialog], spacing = 0.0)
+        let content = VStack([self.row_menu, self.prompt, self.confirm, self.expose.dialog], spacing = 0.0)
         content.layout().set_flex()
         let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("save", self.update_chosen),
                            self.shelf_button("text-tool", self.rename_chosen), Spacer(), self.shelf_button("trash", self.delete_chosen)])
@@ -164,7 +155,6 @@ pub class PresetsPane:
     ## photos, as a click does.
     pub func apply(self, at: int) -> unit!:
         let mark = self.mark_of(at)
-        self.show_essay(mark)
         let tell = self.on_apply else return
         let saved = self.library.presets
         if mark > 0:
@@ -184,20 +174,6 @@ pub class PresetsPane:
         let row = self.row_of(mark)
         if row != self.rows.selected_index():
             self.rows.select(row)
-            self.show_essay(mark)
-
-    ## The essay of mark `mark`: a start's or a look's (a saved preset has none).
-    func show_essay(self, mark: int) -> unit!:
-        var key = ""
-        if preset_marks.start_of(mark) >= 0:
-            key = f"mode/{essays.slug(recipe.mode_name(preset_marks.start_of(mark)))}"
-        elif preset_marks.look_of(mark) >= 0:
-            key = f"look/{essays.slug(looks.name(preset_marks.look_of(mark)))}"
-        let title = essays.essay_title(key)
-        self.about_title.set_text(title.upper())
-        self.about.set_text(essays.essay_text(key))
-        self.about_title.layout().set_visible(title != "")
-        self.about.layout().set_visible(title != "")
 
     # mark: saving =============================================================================
 

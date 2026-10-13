@@ -154,7 +154,7 @@ pub class Panels:
         let toolbar = HStack([Spacer(), self.mode_bar, Spacer(),
                               Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
-                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.watch_development, actions.refine_grain], font = font),
+                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.before_after, actions.watch_development, actions.refine_grain], font = font),
                               Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.copy_film, actions.paste_film,
                                                     actions.sync_settings, actions.reset_settings], font = font),
                               Menu("Window", actions.modes + [Command("", divider = true), actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
@@ -227,6 +227,10 @@ pub class Panels:
             self.session.reset(self.library_pane.selection())))
         self.connections.append(actions.zoom.on_trigger(func () -> unit!:
             self.viewer.toggle_zoom()))
+        self.connections.append(actions.before_after.on_trigger(func () -> unit!:
+            let on = not actions.before_after.is_checked()
+            actions.before_after.set_checked(on)
+            self.viewer.compare_before(on)))
         self.connections.append(actions.watch_development.on_trigger(func () -> unit!:
             let on = not actions.watch_development.is_checked()
             actions.watch_development.set_checked(on)

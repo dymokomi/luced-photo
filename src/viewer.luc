@@ -76,6 +76,8 @@ pub class Viewer: Widget:
     var developing: bool = false
     ## Whether the picture shown is being made again (`set_pending`).
     var pending: bool = false
+    ## Whether the split between before and after is being dragged.
+    var splitting: bool = false
     ## Told when a preview or a develop is ready (`wake_with`), and the waker
     ## that has the develop's loading thread notify it.
     var ready: Notifier? = none
@@ -138,7 +140,8 @@ pub class Viewer: Widget:
         self.loader.request(id, preview)
         self.developer.clear()
         self.developing = false
-        if self.live:
+        # Comparing before and after needs the live develop, in any mode.
+        if self.live or self.developer.is_comparing():
             self.go_live()
 
     ## The photo turned a quarter: its full size's sides swap, and it fits again.
@@ -312,6 +315,8 @@ pub class Viewer: Widget:
         if self.developer.has_image() and self.developer.ready():
             let place = self.placement(self.developer.output_width(), self.developer.output_height())
             self.drawn = place
+            if self.developer.is_comparing():
+                self.draw_split(painter, place)
             if self.guiding:
                 self.draw_guides(painter, place)
             if self.cropping:
@@ -356,6 +361,53 @@ pub class Viewer: Widget:
         if on != self.pending:
             self.pending = on
             self.box.invalidate()
+
+    ## Before and after: the photo as the camera took it (white balance and
+    ## exposure, no film) left of the line, the develop right of it. The live
+    ## develop only: it goes live to show it.
+    pub func compare_before(self, on: bool) -> unit!:
+        self.developer.compare_before(on)
+        if on:
+            self.go_live()
+        self.box.invalidate()
+
+    ## The line between before and after, a handle to drag it, and their names
+    ## at its top.
+    func draw_split(self, painter: Painter, place: Rect) -> unit!:
+        let x = self.split_x()
+        let top = math.max(place.y, 0.0)
+        let bottom = math.min(place.y + place.height, self.pane.height)
+        painter.rectangle(Rect(x - 1.0, top, 2.0, bottom - top), theme.text())
+        let middle = (top + bottom) * 0.5
+        painter.rounded_rectangle(Rect(x - 7.0, middle - 14.0, 14.0, 28.0), theme.text(), 7.0)
+        painter.rounded_rectangle(Rect(x - 3.0, middle - 9.0, 6.0, 18.0), theme.grey(60.0), 3.0)
+        for (name, left) in [("Before", x - 62.0), ("After", x + 8.0)]:
+            painter.rounded_rectangle(Rect(left, top + 8.0, 54.0, 18.0), theme.grey(30.0), 4.0)
+            painter.text(name, left + 6.0, top + 9.0, theme.text())
+
+    ## Where the split line is across the pane.
+    func split_x(self) -> float:
+        return math.clamp(self.drawn.x + self.drawn.width * self.developer.split_at(), 0.0, self.pane.width)
+
+    ## Drag the split line; whether the event was the line's.
+    func split_event(self, event: Event) -> bool!:
+        if not self.developer.is_comparing():
+            self.splitting = false
+            return false
+        let near = math.abs(event.x - self.split_x()) <= 7.0
+        if event.kind == EventKind.pointer_down and event.inside and event.button == 0 and near:
+            self.splitting = true
+            return true
+        if self.splitting and event.kind == EventKind.pointer_moved:
+            self.developer.set_split((event.x - self.drawn.x) / math.max(self.drawn.width, 1.0))
+            self.box.invalidate()
+            return true
+        if self.splitting and event.kind == EventKind.pointer_up:
+            self.splitting = false
+            return true
+        if event.kind == EventKind.pointer_moved and not self.panning and not self.guiding and not self.cropping:
+            self.box.set_cursor(Cursor.resize_horizontal if near else Cursor.arrow)
+        return false
 
     ## Where a `width` × `height` picture of the photo goes in the pane: fitted,
     ## or at the zoom about the center point.
@@ -618,6 +670,8 @@ pub class Viewer: Widget:
             else:
                 # Touchpad scrolling pans.
                 self.pan_by(event.scroll_x, event.scroll_y)
+            return
+        if self.split_event(event):
             return
         if self.panning:
             if event.kind == EventKind.pointer_moved:
