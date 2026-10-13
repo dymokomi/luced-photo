@@ -1,7 +1,11 @@
-## The Viewer: the current photo, fitted to the pane on a dark backdrop. The
-## library's 2048 px preview shows at once; the photo then loads into the develop
-## renderer (luce-develop), which draws it with its settings every frame, so
-## every slider shows as it moves.
+## The Viewer: the current photo, fitted to the pane on a dark backdrop. A
+## picture shows at once: the photo developed with its settings when the
+## library has it (library.lucb's developed picture), else the camera's
+## preview. Live, the photo then loads into the develop renderer
+## (luce-develop), which draws it with its settings every frame, so every
+## slider shows as it moves. The Library mode is not live: the developed
+## picture is the photo, nothing develops again, until an edit or a zoom past
+## the picture's pixels asks for it.
 ##
 ## Zoom and pan, as luced-2d's canvas: the photo fits the pane until zoomed. Z
 ## (the Zoom command) or a double-click toggles 1:1, one photo pixel to one
@@ -64,6 +68,10 @@ pub class Viewer: Widget:
     var center_v: float = 0.5
     ## The photo's file and full size, and whether its full-size develop is on its way.
     var original: str = ""
+    ## Whether the photo shown develops live (the edit modes), and whether its
+    ## develop was asked for.
+    var live: bool = true
+    var developing: bool = false
     var full_width: float = 0.0
     var full_height: float = 0.0
     var full_asked: bool = false
@@ -120,7 +128,40 @@ pub class Viewer: Widget:
         self.loader.clear()
         self.loader.request(id, preview)
         self.developer.clear()
-        self.developer.open(original, develop_edge)
+        self.developing = false
+        if self.live:
+            self.go_live()
+
+    ## The photo turned a quarter: its full size's sides swap, and it fits again.
+    pub func swap_sides(self) -> unit!:
+        let width = self.full_width
+        self.full_width = self.full_height
+        self.full_height = width
+        self.zoom = 0.0
+        self.center_u = 0.5
+        self.center_v = 0.5
+        self.box.invalidate()
+
+    ## Develop live from now on (an edit mode), or only show pictures (Library).
+    pub func set_live(self, on: bool) -> unit!:
+        self.live = on
+        if on:
+            self.go_live()
+
+    ## Load the photo shown into the develop, once.
+    pub func go_live(self) -> unit!:
+        if self.developing or self.original == "":
+            return
+        self.developing = true
+        self.developer.open(self.original, develop_edge)
+
+    ## The photo's picture made again (`id`, from `path`): show it, if it is
+    ## the photo shown and nothing develops it live.
+    pub func picture_ready(self, id: int, path: str) -> unit!:
+        if self.developing or (id != self.shown and id != self.wanted):
+            return
+        self.wanted = id
+        self.loader.request(id, path)
 
     ## Develop with `look` from the next frame on.
     pub func set_look(self, look: Look) -> unit!:
@@ -204,6 +245,8 @@ pub class Viewer: Widget:
     pub func clear(self) -> unit!:
         self.loader.clear()
         self.developer.clear()
+        self.developing = false
+        self.original = ""
         self.wanted = -1
         self.shown = -1
         self.picture = none
@@ -257,6 +300,9 @@ pub class Viewer: Widget:
         let place = self.placement(float(picture.width()), float(picture.height()))
         self.drawn = place
         painter.image(picture, place)
+        # Zoomed past the picture's own pixels: develop it, at full size.
+        if not self.developing and self.zoom > 0.0 and place.width * self.backing > float(picture.width()) * 1.05:
+            self.go_live()
 
     ## While the grain is being traced grain by grain: how much is done, at
     ## the photo's bottom left.

@@ -1,0 +1,67 @@
+## The developed-picture cache: the re-renderer develops a photo (a Leica DNG
+## from luce-raw's sample raws, skipped when they are not there) into a fresh
+## library's cache, its picture and thumbnail written and its stamp holding the
+## exact settings it was made with; developed again with other settings, the
+## stamp follows. The library is a temporary folder under build/, removed
+## after. Prints PASS or what went wrong.
+import c
+import strings
+import thread
+from luce_std import files
+from luce_std.collections import Buffer
+import rerender
+import library
+
+let sample: str = "../luce-raw/build/samples/leica_m240.dng"
+
+func present(path: str) -> bool!:
+    let terminated = try strings.copy(path)
+    defer strings.release(terminated)
+    return files.exists((c.str)terminated)
+
+## Develop photo 1 with `settings` and wait for it; whether its picture,
+## thumbnail and stamp are there, the stamp `settings`.
+func developed(root: str, settings: str) -> bool!:
+    let renderer = try rerender.start()
+    defer renderer.release()
+    let held = try renderer.get()
+    try held.request(1, root, sample, settings)
+    var waited = 0
+    while held.take() != 1:
+        thread.sleep(50)
+        waited += 50
+        if waited > 120000:
+            print("FAIL developed: the re-render took over two minutes")
+            return false
+    var path: Buffer
+    defer path.destroy()
+    try library.cache_path(root, "developed", 1, &path)
+    let picture = try present(path.text())
+    try library.cache_path(root, "thumbs", 1, &path)
+    let thumb = try present(path.text())
+    try library.stamp_path(root, 1, &path)
+    let stamp = try files.read_text(path.text())
+    defer stamp.release()
+    if not picture or not thumb or stamp.value != settings:
+        print(f"FAIL developed: picture {picture}, thumbnail {thumb}, stamp “{stamp.value}” for “{settings}”")
+        return false
+    return true
+
+pub func main(arguments: str[]) -> i32!:
+    if not try present(sample):
+        print("skip: no sample raws in ../luce-raw/build/samples (luce-raw/tests/run.py fetches them)")
+        return 0
+    try files.ensure_directory("build")
+    let folder = try files.create_temporary_directory("build")
+    defer folder.release()
+    let terminated = try strings.copy(folder.value)
+    defer strings.release(terminated)
+    defer files.remove_tree((c.str)terminated) catch failure:
+        _ = failure
+    try library.ensure(folder.value)
+    if not try developed(folder.value, ""):
+        return 1
+    if not try developed(folder.value, "exposure=0.5;film_stock=12"):
+        return 1
+    print("PASS developed: the picture and thumbnail written, the stamp the settings each time")
+    return 0

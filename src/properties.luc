@@ -134,7 +134,8 @@ pub class PropertiesPane:
         self.preset.layout().set_visible(chosen and library)
         self.marking.layout().set_visible(chosen and library)
         self.facts.layout().set_visible(chosen and library)
-        self.histogram.layout().set_visible(chosen)
+        # The histogram measures the live develop, which the Library mode does not run.
+        self.histogram.layout().set_visible(chosen and not library)
 
     pub func close(self):
         self.develop.close()

@@ -97,6 +97,8 @@ pub class Panels:
             self.viewer.set_guiding(on, controls.guide_points())
         controls.on_crop_tool = func (on: bool, aspect: float) -> unit!:
             self.viewer.set_cropping(on, controls.crop_values(), self.aspect_ratio(aspect))
+        controls.on_turn = func () -> unit!:
+            self.viewer.swap_sides()
         controls.on_crop_aspect = func (aspect: float) -> unit!:
             self.viewer.set_crop_aspect(self.aspect_ratio(aspect))
         self.viewer.on_crop = func (edges: list[float]) -> unit!:
@@ -235,6 +237,8 @@ pub class Panels:
             self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.bottom)
             self.dock.set_fraction(self.viewer.panel, 0.84)
         self.properties.set_mode(mode)
+        # The Library mode shows developed pictures; the others develop live.
+        self.viewer.set_live(mode != modes.library)
         for (at, command) in self.actions.modes.indexed():
             command.set_checked(at == mode)
         if let app = self.app:
@@ -423,7 +427,18 @@ pub class Panels:
         let id = index.id(lead)
         let other = id != self.session.developing
         self.session.open(id, index.settings(lead))
-        self.viewer.show(id, self.library.preview_path(id), self.library.original_path(lead), index.width(lead), index.height(lead))
+        # The developed picture when it is of these settings; else the camera's
+        # preview while the picture is made again.
+        let settings = index.settings(lead)
+        let ready = self.library.developed_ready(id, settings)
+        let picture = self.library.developed_path(id) if ready else self.library.preview_path(id)
+        if not ready:
+            self.rerenderer.request(id, self.library.root, self.library.original_path(lead), settings)
+        # A photo turned on its side shows its sides swapped.
+        let sideways = int(self.properties.develop.look.get("geometry_turn")) % 2 == 1
+        let width = index.height(lead) if sideways else index.width(lead)
+        let height = index.width(lead) if sideways else index.height(lead)
+        self.viewer.show(id, picture, self.library.original_path(lead), width, height)
 
     ## Select the photo at `position` alone and show it.
     pub func show_photo(self, position: int) -> unit!:
@@ -480,6 +495,7 @@ pub class Panels:
         var redone = self.rerenderer.take()
         while redone >= 0:
             self.library_pane.reload_thumbnail(redone)
+            self.viewer.picture_ready(redone, self.library.developed_path(redone))
             redone = self.rerenderer.take()
         self.session.tick()
 

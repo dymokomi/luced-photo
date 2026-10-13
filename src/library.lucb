@@ -3,8 +3,13 @@
 ##     <root>/library.prism            the catalog (catalog.lucb)
 ##     <root>/originals/YYYY/MM/DD/    imported files, by capture date
 ##     <root>/cache/thumbs/<id>.jpg    512 px thumbnails for the grid
-##     <root>/cache/previews/<id>.jpg  2048 px previews for the viewer
+##     <root>/cache/previews/<id>.jpg  2048 px previews (the camera's embedded one)
+##     <root>/cache/developed/<id>.jpg 3072 px, the photo developed with its settings
+##     <root>/cache/developed/<id>.settings  the settings it was developed with
 ##
+## The Library mode shows the developed picture when its settings are the
+## photo's, without developing again (rerender.lucb makes it after edits, or
+## when a photo is shown without one).
 ## Everything under cache/ can be made again from the originals.
 import c
 import strings
@@ -16,6 +21,7 @@ from luce_std.collections import Buffer
 ## The longer side of a grid thumbnail and of a viewer preview, in pixels.
 pub let thumb_edge: i64 = 512
 pub let preview_edge: i64 = 2048
+pub let developed_edge: i64 = 3072
 
 ## `root`/`relative`, onto `out`.
 pub func join_into(root: str, relative: str, out: Buffer*) -> !:
@@ -25,7 +31,8 @@ pub func join_into(root: str, relative: str, out: Buffer*) -> !:
         try out.put_byte('/')
     try out.put_text(relative)
 
-## The thumbnail (`kind` "thumbs") or preview ("previews") file of photo `id`, onto `out`.
+## The thumbnail (`kind` "thumbs"), preview ("previews") or developed picture
+## ("developed") file of photo `id`, onto `out`.
 pub func cache_path(root: str, kind: str, id: i64, out: Buffer*) -> !:
     try join_into(root, "cache/", out)
     try out.put_text(kind)
@@ -37,9 +44,22 @@ pub func cache_path(root: str, kind: str, id: i64, out: Buffer*) -> !:
 pub func ensure(root: str) -> !:
     var path: Buffer
     defer path.destroy()
-    for relative in ["originals", "cache/thumbs", "cache/previews"]:
+    for relative in ["originals", "cache/thumbs", "cache/previews", "cache/developed"]:
         try join_into(root, relative, &path)
         try files.ensure_directory(path.text())
+
+## The settings photo `id`'s developed picture was made with, onto `out`.
+pub func stamp_path(root: str, id: i64, out: Buffer*) -> !:
+    try join_into(root, "cache/developed/", out)
+    try out.put_number(id)
+    try out.put(b".settings")
+
+## The same, for Luce.
+pub func stamp(root: str, id: i64) -> interop.Owned[str]!:
+    var path: Buffer
+    defer path.destroy()
+    try stamp_path(root, id, &path)
+    return try interop.copy_text(path.text())
 
 ## The catalog file of the bundle at `root`, for Luce.
 pub func catalog_path(root: str) -> interop.Owned[str]!:

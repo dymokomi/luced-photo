@@ -119,6 +119,22 @@ pub class PhotoLibrary:
     pub func thumb_path(self, id: int) -> str!:
         return library.cached(self.root, "thumbs", id)
 
+    ## Photo `id`'s developed picture (3072 px), and whether it was made with
+    ## `settings` (its stamp says).
+    pub func developed_path(self, id: int) -> str!:
+        return library.cached(self.root, "developed", id)
+
+    pub func developed_ready(self, id: int, settings: str) -> bool:
+        let stamp = library.stamp(self.root, id) catch _:
+            return false
+        let picture = self.developed_path(id) catch _:
+            return false
+        if not library.exists(stamp) or not library.exists(picture):
+            return false
+        let made = files.read_text(stamp) catch _:
+            return false
+        return made == settings
+
     pub func preview_path(self, id: int) -> str!:
         return library.cached(self.root, "previews", id)
 

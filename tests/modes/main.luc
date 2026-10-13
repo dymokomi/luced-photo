@@ -8,6 +8,12 @@ from app import LucedPhoto
 from luce_std import files, paths
 import modes
 
+func close(a: list[float], b: list[float]) -> bool:
+    for at in 0..<a.length:
+        if a[at] - b[at] > 1.0e-4 or b[at] - a[at] > 1.0e-4:
+            return false
+    return true
+
 func expect(condition: bool, what: str) -> unit!:
     if not condition:
         print(f"FAIL modes: {what}")
@@ -41,6 +47,17 @@ pub func main(arguments: list[str]) -> int!:
     expect(controls.section_shown("Crop") and not controls.section_shown("View"), "View frames a print; no display rendering for it")
     controls.look.set_stage_used(3, true)
     expect(controls.look.has_stage(3) and controls.look.output() == 1, "switching the Lens on keeps the output")
+    # Rotate Right turns the photo a quarter and its crop with it; Left turns both back.
+    controls.set_crop([0.1, 0.2, 0.9, 0.7])
+    controls.turn(1)
+    expect(controls.look.get("geometry_turn") == 1.0, "Rotate Right turns a quarter")
+    let turned = [controls.look.get("crop_left"), controls.look.get("crop_top"), controls.look.get("crop_right"), controls.look.get("crop_bottom")]
+    expect(close(turned, [0.3, 0.1, 0.8, 0.9]), "the crop turns with the photo")
+    controls.turn(-1)
+    let back = [controls.look.get("crop_left"), controls.look.get("crop_top"), controls.look.get("crop_right"), controls.look.get("crop_bottom")]
+    expect(controls.look.get("geometry_turn") == 0.0 and close(back, [0.1, 0.2, 0.9, 0.7]), "Rotate Left turns both back")
+    controls.turn(-1)
+    expect(controls.look.get("geometry_turn") == 3.0, "Rotate Left from upright is three quarters")
     for mode in 0..<modes.count:
         panels.set_mode(mode)
         photo.run(["luced-photo", "--smoke"])

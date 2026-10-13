@@ -1,6 +1,8 @@
-## Re-rendering edited photos: after a photo's develop changes, its viewer
-## preview and grid thumbnail are developed again on the CPU (luce-develop's
-## process) on a thread of their own, so the grid shows edits. A newer request
+## Re-rendering photos: after a photo's develop changes, or when one is shown
+## without a developed picture of its settings, its developed picture (3072 px,
+## stamped with the settings it was made with) and grid thumbnail are developed
+## again on the CPU (luce-develop's process) on a thread of their own, so the
+## grid shows edits and the Library mode shows the photo without developing it. A newer request
 ## for the same photo replaces one still waiting; the window polls which photos
 ## are done and reloads their cells. Each request names its library, so one
 ## asked for before the window opened another library still lands in its own.
@@ -14,6 +16,7 @@ from luce_std.collections import Buffer, List
 from luce_develop import scene
 from luce_develop import process
 from luce_develop.settings import parse
+from luce_std import files
 import library
 
 struct Job:
@@ -57,16 +60,22 @@ func work(context: void*?):
             _ = failure
         shared.lock.unlock()
 
-## Develop `job`'s photo into its preview and thumbnail files.
+## Develop `job`'s photo into its developed picture, its stamp, and its
+## thumbnail. The stamp is written last, so a picture half-written is never
+## taken for one of these settings.
 func render(job: const Job*, path: Buffer*) -> !:
     let root = job.root
-    var opened = try scene.open(job.original, (usize)library.preview_edge)
+    var opened = try scene.open(job.original, (usize)library.developed_edge)
     defer opened.close()
-    var preview = try process.render(&opened, parse(job.settings))
-    defer preview.close()
-    try library.cache_path(root, "previews", job.id, path)
-    try preview.save_jpeg(path.text(), 88)
-    var thumb = try preview.shrunk((usize)library.thumb_edge)
+    let settings = parse(job.settings)
+    try opened.turn((i64)settings.get(.geometry_turn))
+    var developed = try process.render(&opened, settings)
+    defer developed.close()
+    try library.cache_path(root, "developed", job.id, path)
+    try developed.save_jpeg(path.text(), 92)
+    try library.stamp_path(root, job.id, path)
+    try files.write_text(path.text(), job.settings)
+    var thumb = try developed.shrunk((usize)library.thumb_edge)
     defer thumb.close()
     try library.cache_path(root, "thumbs", job.id, path)
     try thumb.save_jpeg(path.text(), 82)

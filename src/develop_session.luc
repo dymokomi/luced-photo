@@ -102,6 +102,8 @@ pub class DevelopSession:
 
     ## The controls changed the look: show it, and save it once edits settle.
     pub func changed(self) -> unit!:
+        # An edit shows as it is made, even in the Library mode.
+        self.viewer.go_live()
         self.viewer.set_look(self.controls.look)
         self.histogram_due = 6
         if self.developing >= 0:

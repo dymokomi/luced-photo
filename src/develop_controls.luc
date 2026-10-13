@@ -84,7 +84,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "paper_surface", "print_material", "print_optical", "film_backing", "develop_agitation"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "paper_surface", "print_material", "print_optical", "film_backing", "develop_agitation", "geometry_turn"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -158,6 +158,8 @@ pub class DevelopControls:
     ## (width over height; 0 free, -1 the photo's own).
     pub var on_crop_tool: func(bool, float) -> unit!? = none
     pub var on_crop_aspect: func(float) -> unit!? = none
+    ## Called when the photo turns a quarter (its sides swap).
+    pub var on_turn: func() -> unit!? = none
     ## Called after the controls show other settings (another photo, undo).
     pub var on_shown: func() -> unit!? = none
     ## The mode whose sections show (modes.luc).
@@ -240,6 +242,10 @@ pub class DevelopControls:
             specs.insert(2, ParameterSpec(name = "clear_guides", label = "Clear Guides", kind = ParameterKind.button))
             specs.append(ParameterSpec(name = "geometry_autocrop", label = "Crop to Fit", kind = ParameterKind.toggle, value = 1.0))
         if title == "Crop":
+            specs.append(ParameterSpec(name = "turn_left", label = "Rotate Left", kind = ParameterKind.button, join = true,
+                                       doc = "A quarter turn counterclockwise; the crop turns with the photo"))
+            specs.append(ParameterSpec(name = "turn_right", label = "Rotate Right", kind = ParameterKind.button,
+                                       doc = "A quarter turn clockwise; the crop turns with the photo"))
             specs.append(ParameterSpec(name = "crop_tool", label = "Crop", kind = ParameterKind.button, join = true))
             specs.append(ParameterSpec(name = "aspect", label = "Aspect", kind = ParameterKind.menu, resettable = false,
                                        items = "Free=0|Original=-1|1:1=1|4:5=0.8|5:4=1.25|3:2=1.5|2:3=0.6667|16:9=1.7778"))
@@ -400,6 +406,10 @@ pub class DevelopControls:
             "crop_tool":
                 self.set_cropping(not self.cropping)
                 return
+            "turn_left":
+                self.turn(-1)
+            "turn_right":
+                self.turn(1)
             "clear_guides":
                 self.look.set_guides([], [], [], [])
                 if let tell = self.on_guides_cleared:
@@ -414,6 +424,22 @@ pub class DevelopControls:
                 return
         self.show_values()
         self.changed()
+
+    ## Turn the photo a quarter `direction` (1 clockwise, -1 counterclockwise),
+    ## the crop with it: a point (x, y) of the frame goes to (1 − y, x)
+    ## clockwise, (y, 1 − x) counterclockwise.
+    pub func turn(self, direction: int) -> unit!:
+        let left = self.look.get("crop_left")
+        let top = self.look.get("crop_top")
+        let right = self.look.get("crop_right")
+        let bottom = self.look.get("crop_bottom")
+        if direction > 0:
+            self.set_crop([1.0 - bottom, left, 1.0 - top, right])
+        else:
+            self.set_crop([top, 1.0 - right, bottom, 1.0 - left])
+        self.look.set("geometry_turn", float((int(self.look.get("geometry_turn")) + direction + 4) % 4))
+        if let tell = self.on_turn:
+            tell()
 
     func changed(self) -> unit!:
         if let tell = self.on_change:
@@ -507,7 +533,7 @@ pub class DevelopControls:
         self.showing = true
         for section in self.sections:
             for (index, name) in section.names.indexed():
-                if name == section.title or name == "band" or name.starts_with("mixer_") or name in ["as_shot", "draw_guides", "clear_guides", "reset", "crop_tool", "aspect"]:
+                if name == section.title or name == "band" or name.starts_with("mixer_") or name in ["as_shot", "draw_guides", "clear_guides", "reset", "crop_tool", "aspect", "turn_left", "turn_right"]:
                     continue
                 if name == "stage_on":
                     section.panel.set_value(index, 1.0 if self.look.has_stage(section.stage) else 0.0)
