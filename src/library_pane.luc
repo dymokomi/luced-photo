@@ -17,6 +17,7 @@ from photo_library import PhotoLibrary
 from thumbs import Loader
 import thumbs
 import library
+import preset_marks
 
 ## The list's rows, as tall as the Library pane's folders.
 pub let list_row_height: float = 24.0
@@ -281,13 +282,13 @@ pub class LibraryPane:
         let presets = self.library.presets
         var cells: list[TableCell] = []
         for at in 0..<index.count():
-            let preset = presets.position_of(index.preset(at))
+            let preset = preset_marks.name_of(presets, index.preset(at))
             cells.append(TableCell(text = index.name(at)))
             cells.append(TableCell(text = index.captured(at).replace("T", "  "), muted = true))
             cells.append(TableCell(text = camera_name(index.make(at), index.model(at))))
             cells.append(TableCell(text = index.lens(at), muted = true))
             cells.append(TableCell(text = "★".repeat(index.rating(at))))
-            cells.append(TableCell(text = presets.name(preset) if preset >= 0 else "", muted = true))
+            cells.append(TableCell(text = preset, muted = true))
         self.list.set_rows(cells)
 
     ## Take in finished thumbnails and ask for the ones now on screen; called on

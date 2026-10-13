@@ -1,0 +1,38 @@
+## What a photo's "preset" mark says it was last given from the Presets pane:
+## a saved preset (its id, above 0), a start (-1 less the mode's position), a
+## film look (-1001 less the look's position), or nothing (0). The Presets pane
+## highlights it for the photo shown; Properties and the list name it.
+from presets import PresetList
+from luce_develop import recipe
+from luce_develop import looks
+
+let look_base: int = -1001
+
+pub func for_start(at: int) -> int:
+    return -1 - at
+
+pub func for_look(at: int) -> int:
+    return look_base - at
+
+## The start mark `mark` names (a mode's position), or -1.
+pub func start_of(mark: int) -> int:
+    let at = -1 - mark
+    return at if mark < 0 and mark > look_base and at < recipe.mode_total() else -1
+
+## The film look mark `mark` names (its position), or -1.
+pub func look_of(mark: int) -> int:
+    let at = look_base - mark
+    return at if mark <= look_base and at < looks.count() else -1
+
+## What mark `mark` is called, as the Presets pane lists it; "" for none.
+pub func name_of(saved: PresetList, mark: int) -> str:
+    if mark > 0:
+        let found = saved.position_of(mark)
+        return saved.name(found) if found >= 0 else ""
+    let start = start_of(mark)
+    if start >= 0:
+        return f"Start · {recipe.mode_name(start)}"
+    let look = look_of(mark)
+    if look >= 0:
+        return f"Film · {looks.name(look)}"
+    return ""

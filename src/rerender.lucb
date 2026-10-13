@@ -37,6 +37,8 @@ struct Shared:
     var wake: sync.Condition
     var jobs: List[Job]
     var done: List[i64]
+    ## The photo being developed now (-1: none).
+    var active: i64
     var stopping: bool
     ## Who to tell when there is something to take: the window's notifier,
     ## held for this thread (luce-ui's notify_handle), none before `wake_with`.
@@ -55,11 +57,13 @@ func work(context: void*?):
             return
         let job = shared.jobs.at(0)
         shared.jobs.remove(0)
+        shared.active = job.id
         shared.lock.unlock()
         render(&job, &path) catch failure:
             _ = failure
         job.release()
         shared.lock.lock()
+        shared.active = -1
         shared.done.append(job.id) catch failure:
             _ = failure
         if let waker = shared.waker:
@@ -121,6 +125,25 @@ pub struct Rerenderer:
         shared.waker = handle
         shared.lock.unlock()
 
+    ## How many photos are waiting to be developed again, the one under way included.
+    pub func waiting() -> i64:
+        let shared = self.shared else return 0
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        return (i64)shared.jobs.length() + (1 if shared.active >= 0 else 0)
+
+    ## Whether photo `id` is waiting to be developed again (or being developed).
+    pub func is_waiting(id: i64) -> bool:
+        let shared = self.shared else return false
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        if shared.active == id:
+            return true
+        for job in shared.jobs.view():
+            if job.id == id:
+                return true
+        return false
+
     ## The next photo whose files were made again, or -1.
     pub func take() -> i64:
         let shared = self.shared else return -1
@@ -153,7 +176,7 @@ pub let rerenderer_type: interop.Type[Rerenderer] = interop.Type[Rerenderer]("Re
 
 ## A re-renderer, its thread started.
 pub func start() -> interop.Reference[Rerenderer]!:
-    let shared = try new Shared in memory.heap
+    let shared = try new Shared(active = -1) in memory.heap
     errdefer free(shared) in memory.heap
     let worker = try thread.spawn(work, (void*)shared, name = "luced-photo rerender")
     let made = try new Rerenderer(shared = shared, worker = worker) in memory.heap

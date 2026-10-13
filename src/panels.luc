@@ -54,6 +54,8 @@ pub class Panels:
     pub var mode: int = -1
     var mode_before: int = -1
     let status: Text
+    ## What runs in the background, at the status line's right ("Developing 3 photos…").
+    let activity: Text
     let palette: CommandPalette
     ## Develops edited photos' previews and thumbnails again.
     let rerenderer: Rerenderer
@@ -97,20 +99,24 @@ pub class Panels:
         self.viewer = Viewer()
         self.properties = PropertiesPane(self.library, self.actions, font)
         self.status = Text("", font = font, muted = true)
+        self.activity = Text("", font = font)
         self.palette = CommandPalette(self.actions.all, font = font)
         self.session = DevelopSession(self.library, self.properties.develop, self.viewer, self.library_pane, self.rerenderer)
         self.session.on_status = self.tell
+        self.session.on_requested = self.show_activity
         self.presets = PresetsPane(self.library, font)
         self.presets.current = self.session.recipe_text
         self.presets.on_status = self.tell
         self.presets.on_apply = func (name: str, text: str, id: int) -> unit!:
             let picked = self.library_pane.selection()
             self.session.apply_preset(picked, name, text)
-            # The photos remember the preset (0: a start or a film look), whose
-            # parameters the Library mode then shows.
+            self.show_activity()
+            # The photos remember what they were given (preset_marks.luc); a
+            # saved preset's parameters the Library mode then shows.
             if picked.length > 0:
                 self.library.set_marks(picked, "preset", id)
                 self.properties.show(self.library_pane.lead(), picked.length)
+                self.library_pane.refresh_badges(picked)
         self.mode_bar = ModeBar(font)
         self.mode_bar.on_pick = self.set_mode
         self.library_pane.on_pick = self.show_selection
@@ -152,7 +158,7 @@ pub class Panels:
         self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
         self.dock.set_fraction(self.viewer.panel, 0.74)
         self.dock.layout().set_flex()
-        let footer = HStack([self.status], padding = 6.0)
+        let footer = HStack([self.status, Spacer(), self.activity], padding = 6.0)
         self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
         self.body.layout().set_flex()
         self.actions.refresh(false)
@@ -470,6 +476,7 @@ pub class Panels:
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)
         if lead < 0:
+            self.presets.follow(0)
             self.session.close_photo()
             # The controls show the defaults, not the photo let go.
             self.properties.develop.show("", 5500.0, 0.0)
@@ -479,6 +486,7 @@ pub class Panels:
         let index = self.library.index
         let id = index.id(lead)
         let other = id != self.session.developing
+        self.presets.follow(index.preset(lead))
         self.session.open(id, index.settings(lead))
         # The developed picture when it is of these settings; else the camera's
         # preview while the picture is made again.
@@ -492,6 +500,7 @@ pub class Panels:
         let width = index.height(lead) if sideways else index.width(lead)
         let height = index.width(lead) if sideways else index.height(lead)
         self.viewer.show(id, picture, self.library.original_path(lead), width, height)
+        self.show_activity()
 
     ## Select the photo at `position` alone and show it.
     pub func show_photo(self, position: int) -> unit!:
@@ -565,6 +574,15 @@ pub class Panels:
             self.library_pane.reload_thumbnail(redone)
             self.viewer.picture_ready(redone, self.library.developed_path(redone))
             redone = self.rerenderer.take()
+        self.show_activity()
+
+    ## The photos being developed again in the background, at the status line's
+    ## right, and whether the one shown is among them (the viewer says so).
+    func show_activity(self) -> unit!:
+        let waiting = self.rerenderer.waiting()
+        self.activity.set_text("" if waiting == 0 else (f"Developing {waiting} photos…" if waiting > 1 else "Developing 1 photo…"))
+        let developing = self.session.developing
+        self.viewer.set_pending(developing >= 0 and self.rerenderer.is_waiting(developing))
 
     pub func tell(self, text: str) -> unit!:
         self.status.set_text(text)

@@ -75,6 +75,8 @@ pub class DevelopSession:
     ## Copied settings, without framing.
     var copied: str? = none
     pub var on_status: func(str) -> unit!? = none
+    ## Told after a photo is sent to be developed again (the window shows it busy).
+    pub var on_requested: func() -> unit!? = none
 
     pub func init(self, library: PhotoLibrary, controls: DevelopControls, viewer: Viewer, pane: LibraryPane, rerenderer: Rerenderer):
         self.library = library
@@ -156,10 +158,15 @@ pub class DevelopSession:
         if at >= 0:
             self.pane.refresh_badges([at])
             self.rerenderer.request(id, self.library.root, self.library.original_path(at), text)
+            if let told = self.on_requested:
+                told()
 
     ## Show settings `text` on the developed photo and save them, without a step.
+    ## It is an edit: the viewer develops it live at once (even in the Library
+    ## mode), not after its picture is made again.
     func take(self, text: str) -> unit!:
         self.controls.reload(text)
+        self.viewer.go_live()
         self.viewer.set_look(self.controls.look)
         self.viewer.want_histogram()
         self.store(self.developing, text)

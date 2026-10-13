@@ -17,6 +17,7 @@ from expose_dialog import ExposeDialog
 import presets
 from luce_develop import looks
 import essays
+import preset_marks
 from luce_develop import recipe
 from luce_develop import settings
 
@@ -50,7 +51,8 @@ pub class PresetsPane:
     var deleting: int = -1
     ## The developed photo's settings as a saved preset holds them, none without one.
     pub var current: func() -> str?!? = none
-    ## A row was clicked: its name, settings and preset id (0 for a start or a film look).
+    ## A row was clicked: its name, settings and the mark the photos keep of it
+    ## (preset_marks.luc).
     pub var on_apply: func(str, str, int) -> unit!? = none
     pub var on_status: func(str) -> unit!? = none
 
@@ -142,12 +144,33 @@ pub class PresetsPane:
         self.show_essay(at)
         let tell = self.on_apply else return
         if at >= 0 and at < modes:
-            tell(recipe.mode_name(at), settings.mode_text(at), 0)
+            tell(recipe.mode_name(at), settings.mode_text(at), preset_marks.for_start(at))
         elif at >= modes and at < modes + saved.count():
             tell(saved.name(at - modes), saved.settings(at - modes), saved.id(at - modes))
         elif at >= modes + saved.count() and at < modes + saved.count() + looks.count():
             let look = at - modes - saved.count()
-            tell(looks.name(look), looks.text(look), 0)
+            tell(looks.name(look), looks.text(look), preset_marks.for_look(look))
+
+    ## Highlight what the photo shown was last given (its mark, preset_marks.luc),
+    ## or nothing: a highlighted row is always the photo's own, so a click on
+    ## any row shows as a change.
+    pub func follow(self, mark: int) -> unit!:
+        let saved = self.library.presets
+        let modes = recipe.mode_total()
+        var row = -1
+        if mark > 0:
+            let found = saved.position_of(mark)
+            row = modes + found if found >= 0 else -1
+        elif preset_marks.start_of(mark) >= 0:
+            row = preset_marks.start_of(mark)
+        elif preset_marks.look_of(mark) >= 0:
+            row = modes + saved.count() + preset_marks.look_of(mark)
+        if row != self.rows.selected_index():
+            self.rows.select(row)
+            if row >= 0:
+                self.show_essay(row)
+            else:
+                self.show_essay(-1)
 
     ## The essay of row `at`: a start's or a look's (a saved preset has none).
     func show_essay(self, at: int) -> unit!:

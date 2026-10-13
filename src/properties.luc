@@ -10,6 +10,7 @@ from actions import Actions
 from develop_controls import DevelopControls
 import modes
 import presets
+import preset_marks
 
 pub class PropertiesPane:
     pub let panel: Panel
@@ -112,8 +113,10 @@ pub class PropertiesPane:
     ## mode shows (Exposure and White Balance without one).
     func show_preset(self, at: int) -> unit!:
         let saved = self.library.presets
-        let found = saved.position_of(self.library.index.preset(at))
-        self.preset.set_text(f"PRESET · {saved.name(found).upper()}" if found >= 0 else "NO PRESET")
+        let mark = self.library.index.preset(at)
+        let found = saved.position_of(mark)
+        let name = preset_marks.name_of(saved, mark)
+        self.preset.set_text(f"PRESET · {name.upper()}" if name != "" else "NO PRESET")
         let exposed = saved.exposed(found) if found >= 0 else presets.default_exposed
         self.develop.exposed = exposed.split("|")
         if self.mode == modes.library:

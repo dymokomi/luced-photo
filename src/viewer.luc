@@ -74,6 +74,8 @@ pub class Viewer: Widget:
     ## develop was asked for.
     var live: bool = true
     var developing: bool = false
+    ## Whether the picture shown is being made again (`set_pending`).
+    var pending: bool = false
     ## Told when a preview or a develop is ready (`wake_with`), and the waker
     ## that has the develop's loading thread notify it.
     var ready: Notifier? = none
@@ -287,6 +289,8 @@ pub class Viewer: Widget:
         if self.developer.poll():
             if let tell = self.on_developed:
                 tell(self.developer.shot_temperature(), self.developer.shot_tint(), self.developer.shot_seconds())
+        # A scene loaded, or settings prepared: the next frame takes them.
+        if self.developing:
             self.box.invalidate()
 
     pub func layout(self) -> Layout:
@@ -301,18 +305,25 @@ pub class Viewer: Widget:
         self.backing = size.pixel_width / size.width if size.width > 0.0 else 1.0
         self.pane = Size(size.width, size.height)
         painter.rectangle(Rect(0.0, 0.0, size.width, size.height), theme.viewer_backdrop())
+        # The develop under way: a photo loading, or its settings being prepared.
+        let working = self.developing and (not self.developer.has_image() or self.developer.busy())
         if self.developer.has_image():
             let place = self.placement(self.developer.output_width(), self.developer.output_height())
-            self.drawn = place
+            # Drawn even before it is ready: drawing is what sends it its settings.
             self.developer.draw(target, place.x, place.y, place.width, place.height)
+        if self.developer.has_image() and self.developer.ready():
+            let place = self.placement(self.developer.output_width(), self.developer.output_height())
+            self.drawn = place
             if self.developer.is_comparing():
                 self.draw_split(painter, place)
             if self.guiding:
                 self.draw_guides(painter, place)
             if self.cropping:
                 self.draw_crop(painter, place)
-            if self.developer.is_refining():
-                self.draw_refining(painter, place)
+            if working:
+                self.draw_badge(painter, place, "Developing…")
+            elif self.developer.is_refining():
+                self.draw_badge(painter, place, f"Grain {int(self.developer.refined_share() * 100.0)} %")
             self.ask_full(place)
             # Development watched, or grain still refining: the next frame
             # carries it on.
@@ -327,17 +338,28 @@ pub class Viewer: Widget:
         let place = self.placement(float(picture.width()), float(picture.height()))
         self.drawn = place
         painter.image(picture, place)
+        # Developing it live, or (the Library) its picture being made again.
+        if working or self.pending:
+            self.draw_badge(painter, place, "Developing…")
         # Zoomed past the picture's own pixels: develop it, at full size.
         if not self.developing and self.zoom > 0.0 and place.width * self.backing > float(picture.width()) * 1.05:
             self.go_live()
 
-    ## While the grain is being traced grain by grain: how much is done, at
-    ## the photo's bottom left.
-    func draw_refining(self, painter: Painter, place: Rect) -> unit!:
+    ## What the develop is doing, at the photo's bottom left: "Developing…"
+    ## until what is shown is what was asked for, then "Grain N %" while the
+    ## grain is traced grain by grain.
+    func draw_badge(self, painter: Painter, place: Rect, text: str) -> unit!:
         let left = math.max(place.x, 0.0) + 10.0
         let bottom = math.min(place.y + place.height, self.pane.height) - 30.0
         painter.rounded_rectangle(Rect(left, bottom, 112.0, 20.0), theme.grey(30.0), 4.0)
-        painter.text(f"Grain {int(self.developer.refined_share() * 100.0)} %", left + 8.0, bottom + 3.0, theme.text())
+        painter.text(text, left + 8.0, bottom + 3.0, theme.text())
+
+    ## Whether the photo's picture is being made again (the Library mode shows
+    ## it, not a live develop): the viewer says so until the new one is in.
+    pub func set_pending(self, on: bool) -> unit!:
+        if on != self.pending:
+            self.pending = on
+            self.box.invalidate()
 
     ## Outputs A and B compared: the line between them, with a handle to drag,
     ## and their letters at its top.
