@@ -4,11 +4,13 @@
 ## footer imports a folder or photos and makes a folder; a row's menu (right
 ## click) makes a folder at the top or inside it, renames or deletes it (its
 ## photos and folders go to the folder it was in), and moves the selected
-## photos into it.
+## photos into it. Below the folders, each camera plugged in has a row: an
+## import of its new photos once its session is open.
 from luce_ui.ui import Widget, Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ContextMenu, Command, TextPrompt, ConfirmDialog, Font, ScrollView
 from interop import Connection
 from photo_library import PhotoLibrary
 from folder_tree import FolderTree
+from luce_ptp.ptp import Watcher
 
 pub class FoldersPane:
     pub let panel: Panel
@@ -33,6 +35,10 @@ pub class FoldersPane:
     ## Move the selected photos into a folder.
     pub var on_move_here: func(int) -> unit!? = none
     pub var on_status: func(str) -> unit!? = none
+    ## The cameras' rows, and the import asked of camera `at`.
+    let cameras: VStack
+    var camera_connections: list[Connection] = []
+    pub var on_camera_import: func(int) -> unit!? = none
 
     pub func init(self, library: PhotoLibrary, font: Font, imports: list[Command]) -> unit!:
         self.library = library
@@ -67,7 +73,9 @@ pub class FoldersPane:
         self.connections.append(self.prompt.on_submit(self.submitted))
         self.confirm = ConfirmDialog(font = font)
         self.connections.append(self.confirm.on_choose(self.chosen_delete))
-        let content = VStack([self.menu, self.prompt, self.confirm], spacing = 0.0)
+        self.cameras = VStack([], spacing = 2.0, padding = 6.0)
+        self.cameras.layout().set_visible(false)
+        let content = VStack([self.menu, self.cameras, self.prompt, self.confirm], spacing = 0.0)
         content.layout().set_flex()
         var buttons: list[Widget] = []
         for (at, command) in imports.indexed():
@@ -84,6 +92,26 @@ pub class FoldersPane:
         button.set_style(ButtonStyle.plain)
         self.connections.append(button.on_click(func () -> unit!:
             command.trigger()))
+        return button
+
+    ## Show a row for each camera in `watcher`: its import once it is ready.
+    pub func show_cameras(self, watcher: Watcher) -> unit!:
+        for connection in self.camera_connections:
+            connection.disconnect()
+        self.camera_connections.clear()
+        var rows: list[Widget] = []
+        for at in 0..<watcher.count():
+            rows.append(self.camera_row(at, watcher.name(at), watcher.ready(at)))
+        self.cameras.set_children(rows)
+        self.cameras.layout().set_visible(rows.length > 0)
+
+    func camera_row(self, at: int, name: str, ready: bool) -> Button!:
+        let button = Button(text = f"Import from {name}" if ready else f"Connecting to {name}…", icon = "camera", font = self.font)
+        button.set_style(ButtonStyle.plain)
+        button.set_enabled(ready)
+        self.camera_connections.append(button.on_click(func () -> unit!:
+            if let start = self.on_camera_import:
+                start(at)))
         return button
 
     func fit_menu(self) -> unit!:
@@ -145,6 +173,9 @@ pub class FoldersPane:
             say(text)
 
     pub func close(self):
+        for connection in self.camera_connections:
+            connection.disconnect()
+        self.camera_connections.clear()
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()

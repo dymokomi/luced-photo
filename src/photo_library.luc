@@ -13,6 +13,7 @@ import importer
 from presets import PresetList
 import presets
 from folders import FolderList
+from luce_ptp.ptp import Watcher
 import folders
 
 ## An import was asked for while another runs.
@@ -111,6 +112,15 @@ pub class PhotoLibrary:
                 error(busy, "an import is already running")
             current.close()
         self.running = importer.start(self.store, self.root, sources, self.folder, self.import_notifier)
+
+    ## Import the photos on camera `at` of `cameras` that the library lacks, as
+    ## start_import imports files.
+    pub func start_camera_import(self, cameras: Watcher, at: int) -> unit!:
+        if let current = self.running:
+            if not current.finished():
+                error(busy, "an import is already running")
+            current.close()
+        self.running = importer.start_camera(self.store, self.root, cameras, at, self.folder, self.import_notifier)
 
     ## Whether an import is running.
     pub func importing(self) -> bool:

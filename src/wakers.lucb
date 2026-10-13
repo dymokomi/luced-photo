@@ -9,6 +9,7 @@ import memory
 from luce_ui import ui
 from luce_develop import renderer
 from luce_develop.renderer import Renderer
+from luce_ptp import ptp
 
 ## The notifier's handle, on the heap where the loading thread reaches it.
 struct Held:
@@ -44,3 +45,32 @@ pub func wake_renderer(developer: interop.Reference[Renderer], notifier: interop
     (try developer.get()).tell(renderer.Wake(call = notify, context = (void*)held))
     let made = try new Waker(held = held, told = developer.clone()) in memory.heap
     return try interop.Reference[Waker].adopt(made, waker_type, memory.heap)
+
+## The camera watcher (luce-ptp) tells the window of cameras coming and going the
+## same way: on the main thread, through a notifier whose handle a CameraWaker
+## holds while the watcher may call. Close it before the watcher.
+pub struct CameraWaker:
+    var held: Held*?
+    var told: interop.Reference[ptp.Watcher]?
+
+    ## Stop the watcher calling, then let the handle go.
+    pub func close():
+        if let watcher = self.told:
+            (watcher.get() catch failure:
+                trap("the camera watcher is gone")).tell(none)
+            watcher.release()
+        self.told = none
+        if let held = self.held:
+            held.handle.release()
+            free(held) in memory.heap
+        self.held = none
+
+pub let camera_waker_type: interop.Type[CameraWaker] = interop.Type[CameraWaker]("CameraWaker", CameraWaker.close, closeable = true, main_thread = true)
+
+## Have `watcher` notify `notifier` whenever a camera comes, goes or gets ready.
+pub func wake_cameras(watcher: interop.Reference[ptp.Watcher], notifier: interop.Reference[ui.Notifier]) -> interop.Reference[CameraWaker]!:
+    let held = try new Held(handle = try ui.notify_handle(notifier)) in memory.heap
+    errdefer free(held) in memory.heap
+    (try watcher.get()).tell(ptp.Wake(call = notify, context = (void*)held))
+    let made = try new CameraWaker(held = held, told = watcher.clone()) in memory.heap
+    return try interop.Reference[CameraWaker].adopt(made, camera_waker_type, memory.heap)

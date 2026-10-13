@@ -1,6 +1,8 @@
 ## The importer: copies photos into the library on threads of its own, so the
-## window never waits on a card or a disk. Its thread gathers the files under the
-## paths it was given and starts a few workers (import_worker.lucb); each file is
+## window never waits on a card, a disk or a camera. Its thread gathers the files
+## under the paths it was given, or lists a camera's photos over PTP (luce-ptp)
+## and downloads the ones the library lacks into incoming/ one by one, and starts
+## a few workers (import_worker.lucb) that take the files as they come; each file is
 ## read, hashed (a photo the library holds is skipped), described, copied to
 ## originals/YYYY/MM/DD/ by capture date and given its preview and thumbnail.
 ## This thread commits the photos' rows as the workers finish them, a few at a
@@ -8,10 +10,12 @@
 ##
 ## The window polls events, one line each, fields separated by tabs:
 ##     found    total                       files to look at
+##     fetching name  done  total            copying a photo from the camera
 ##     added    id  done  total  name       a photo is in the library
 ##     skipped  name  done  total           already in the library
 ##     failed   name  message  done  total  could not be imported
-##     done     added  skipped  failed      the import is over
+##     done     added  skipped  failed  why  the import is over (why it stopped
+##                                           early, or empty)
 import c
 import interop
 import memory
@@ -31,6 +35,7 @@ from luce_std.collections import Buffer, TextPool, List
 import facts
 import library
 from luce_ui import ui
+from luce_ptp import ptp
 
 ## How many photos each commit carries.
 let commit_every: usize = 6
@@ -47,6 +52,8 @@ struct Room:
     var store: prism.Store*?
     ## The library folder the photos go into (0 none).
     var folder: i64
+    ## The camera to import from instead of `sources` (the import thread takes it).
+    var camera: ptp.Transport?
     ## The window's notifier, told of every event and of the end (none: polled
     ## by a caller with no loop, as the tests are).
     var waker: ui.NotifyHandle?
@@ -90,6 +97,9 @@ struct Room:
         return self.finished
 
     func close():
+        if let left = self.camera:
+            left.close(left.context)
+        self.camera = none
         self.events.destroy()
         self.root.destroy()
         self.sources.destroy()
@@ -121,48 +131,36 @@ struct Tally:
     var line: Buffer
     ## "added" lines wait here until their rows are committed, so the window can read them.
     var pending: Buffer
+    ## Why the import stopped before its end (a camera unplugged), or empty.
+    var stopped: Buffer
 
     func close():
         self.line.destroy()
         self.pending.destroy()
+        self.stopped.destroy()
 
 func work(room: Room*) -> !:
     let store = room.store else error(prism.closed, "the importer has no catalog")
     let root = room.root.text()
     try library.ensure(root)
-    var found: List[str]
-    defer found.destroy()
-    var names: TextPool
-    defer names.destroy()
-    try gather(room.sources.text(), root, &found, &names)
-    var tally: Tally
-    defer tally.close()
-    try tally.line.put(b"found\t")
-    try tally.line.put_number((i64)found.length())
-    room.post(tally.line.view())
-    var job = Job(root = root, files = found.view(), known = try catalog.read(store))
+    var job = Job(root = root, known = try catalog.read(store), arriving = true)
     defer job.close()
     job.next_id = job.known.next
+    var tally: Tally
+    defer tally.close()
     tally.next = job.next_id
-    var workers: thread.Handle[4]
-    var started: usize = 0
-    for _at in 0..<import_worker.worker_count(found.length()):
-        workers[started] = thread.spawn(import_worker.work, (void*)&job, name = "luced-photo import worker") catch failure:
-            break
-        started += 1
     var batch = try catalog.Batch.begin(store)
     defer batch.close()
-    let total = found.length()
-    while tally.taken < total and started > 0:
-        if room.is_cancelled():
-            job.cancelled.store(true, .release)
-            break
-        try take_results(&job, &tally, &batch, store, room, total, true)
-    # Workers end with the file in hand; what they finished is still committed.
-    for at in 0..<started:
-        workers[at].join() catch failure:
-            _ = failure
-    try take_results(&job, &tally, &batch, store, room, total, false)
+    if let transport = room.camera:
+        room.camera = none
+        job.staged = true
+        var camera = try ptp.Camera.open(transport)
+        defer camera.close()
+        try import_all(room, &job, &tally, &batch, store, &camera)
+    else:
+        try gather(room.sources.text(), root, &job)
+        job.arriving = false
+        try import_all(room, &job, &tally, &batch, store, none)
     try batch.commit()
     try post_lines(room, &tally.pending)
     try catalog.bake(store)
@@ -173,7 +171,151 @@ func work(room: Room*) -> !:
     try tally.line.put_number(tally.skipped)
     try tally.line.put_byte('\t')
     try tally.line.put_number(tally.failed)
+    try tally.line.put_byte('\t')
+    try put_field(&tally.line, tally.stopped.view())
     room.post(tally.line.view())
+
+## Import the job's files, or `camera`'s photos the library lacks as they download:
+## post how many there are, start the workers and commit what they finish.
+func import_all(room: Room*, job: Job*, tally: Tally*, batch: catalog.Batch*, store: prism.Store*, camera: ptp.Camera*?) -> !:
+    var wanted: List[Wanted]
+    defer wanted.destroy()
+    var listed: TextPool
+    defer listed.destroy()
+    var total = job.files.length()
+    if let open = camera:
+        try list_camera(open, job, &wanted, &listed)
+        total = wanted.length()
+    tally.line.clear()
+    try tally.line.put(b"found\t")
+    try tally.line.put_number((i64)total)
+    room.post(tally.line.view())
+    var workers: thread.Handle[4]
+    var started: usize = 0
+    for _at in 0..<import_worker.worker_count(total):
+        workers[started] = thread.spawn(import_worker.work, (void*)job, name = "luced-photo import worker") catch failure:
+            break
+        started += 1
+    if let open = camera:
+        total = fetch_camera(open, job, tally, batch, store, room, wanted.view(), started > 0) catch failure:
+            job.cancelled.store(true, .release)
+            stop_workers(job, workers[..<started])
+            error(failure.code, failure.message)
+    job.arrived()
+    while tally.taken < total and started > 0:
+        if room.is_cancelled():
+            job.cancelled.store(true, .release)
+            job.arrived()
+            break
+        try take_results(job, tally, batch, store, room, total, true)
+    # Workers end with the file in hand; what they finished is still committed.
+    stop_workers(job, workers[..<started])
+    try take_results(job, tally, batch, store, room, total, false)
+
+## Wake the workers waiting for files that will not come, and wait for them.
+func stop_workers(job: Job*, workers: thread.Handle[]):
+    job.arrived()
+    for worker in workers:
+        worker.join() catch failure:
+            _ = failure
+
+# mark: from a camera ===========================================================================
+
+## A photo on the camera: its handle, size and name (text in the listing's pool),
+## and whether the library holds it already (by name and size).
+struct Wanted:
+    var handle: u32
+    var size: u32
+    var name: str
+    var held: bool
+
+## Every photo on `camera`, onto `wanted`.
+func list_camera(camera: ptp.Camera*, job: Job*, wanted: List[Wanted]*, pool: TextPool*) -> !:
+    var handles: List[u32]
+    defer handles.destroy()
+    try camera.handles(&handles)
+    for handle in handles.view():
+        let info = try camera.object_info(handle, pool)
+        if info.is_folder() or not source.is_photo_name(info.name):
+            continue
+        try wanted.append(Wanted(handle = handle, size = info.size, name = info.name, held = holds_file(job, info.name, info.size)))
+
+## Whether the library holds a photo imported from a file of this name and size.
+func holds_file(job: Job*, name: str, size: u32) -> bool:
+    for photo in job.known.photos.view():
+        if photo.bytes == (i64)size and photo.name == name:
+            return true
+    return false
+
+## Download each wanted photo the library lacks into incoming/<handle>/ and hand it
+## to the workers, committing what they finish between downloads. When the camera
+## goes or a download stops, the photos not reached are left out: the total the
+## import now waits for, returned, counts only the ones reached.
+func fetch_camera(camera: ptp.Camera*, job: Job*, tally: Tally*, batch: catalog.Batch*, store: prism.Store*, room: Room*,
+                  wanted: const Wanted[], working: bool) -> usize!:
+    var incoming: Buffer
+    defer incoming.destroy()
+    try library.join_into(job.root, "incoming", &incoming)
+    # What an earlier import left behind (it stopped before its workers were through).
+    files.remove_tree(try incoming.terminated()) catch failure:
+        _ = failure
+    try files.ensure_directory(incoming.text())
+    var fetching: i64 = 0
+    for item in wanted:
+        if not item.held:
+            fetching += 1
+    var fetched: i64 = 0
+    var staged: Buffer
+    defer staged.destroy()
+    for (at, item) in wanted.indexed():
+        if room.is_cancelled():
+            return at
+        if item.held:
+            tally.taken += 1
+            tally.skipped += 1
+            tally.line.clear()
+            try tally.line.put(b"skipped\t")
+            try put_field(&tally.line, item.name.bytes)
+            try progress_into(&tally.line, tally.taken, wanted.length)
+            room.post(tally.line.view())
+            continue
+        fetched += 1
+        tally.line.clear()
+        try tally.line.put(b"fetching\t")
+        try put_field(&tally.line, item.name.bytes)
+        try progress_into(&tally.line, (usize)fetched, (usize)fetching)
+        room.post(tally.line.view())
+        staged.clear()
+        try staged.put(incoming.view())
+        try staged.put_byte('/')
+        try staged.put_number((i64)item.handle)
+        try files.ensure_directory(staged.text())
+        try staged.put_byte('/')
+        try staged.put_text(item.name)
+        camera.download(item.handle, item.size, staged.text(), ptp.Progress(call = keep_going, context = (void*)room)) catch failure:
+            if failure.code == ptp.cancelled or failure.code == ptp.disconnected:
+                tally.stopped.clear()
+                try tally.stopped.put_text(failure.message)
+                return at
+            tally.taken += 1
+            tally.failed += 1
+            tally.line.clear()
+            try tally.line.put(b"failed\t")
+            try put_field(&tally.line, item.name.bytes)
+            try tally.line.put_byte('\t')
+            try put_field(&tally.line, failure.message.bytes)
+            try progress_into(&tally.line, tally.taken, wanted.length)
+            room.post(tally.line.view())
+            continue
+        try job.arrive(staged.text())
+        if working:
+            try take_results(job, tally, batch, store, room, wanted.length, false)
+    return wanted.length
+
+## A download goes on while the import is not cancelled.
+func keep_going(context: void*?, done: u64, total: u64) -> bool:
+    let room = (Room*)(context else return false)
+    return not room.is_cancelled()
 
 ## Take the workers' finished files (waiting for one when `wait`), commit the
 ## added photos' rows a few at a time and post what happened.
@@ -191,7 +333,7 @@ func take_results(job: Job*, tally: Tally*, batch: catalog.Batch*, store: prism.
     job.lock.unlock()
     for result in results.view():
         tally.taken += 1
-        let name = paths.base(job.files[result.file])
+        let name = paths.base(job.file(result.file))
         tally.line.clear()
         match result.outcome:
             .failed:
@@ -240,9 +382,9 @@ func post_lines(room: Room*, pending: Buffer*) -> !:
     room.post(pending.view()[..<pending.length() - 1])
     pending.clear()
 
-## Every photo file named in `sources` (one path a line): files as they are,
-## folders walked, files inside the library at `root` left out.
-func gather(sources: str, root: str, found: List[str]*, names: TextPool*) -> !:
+## Every photo file named in `sources` (one path a line), onto the job's files:
+## files as they are, folders walked, files inside the library at `root` left out.
+func gather(sources: str, root: str, job: Job*) -> !:
     var first: usize = 0
     let text = sources.bytes
     while first < text.length:
@@ -264,9 +406,9 @@ func gather(sources: str, root: str, found: List[str]*, names: TextPool*) -> !:
                 if source.is_photo_name(entry):
                     let joined = try paths.join(path, entry)
                     defer joined.release()
-                    try found.append(try names.keep_text(joined.value.bytes))
+                    try job.arrive(joined.value)
         elif source.is_photo_name(path):
-            try found.append(try names.keep_text(path.bytes))
+            try job.arrive(path)
 
 ## Append `data` as one tab-separated field: tabs and line breaks inside it become
 ## spaces, so the window may split event lines at tabs.
@@ -323,13 +465,40 @@ pub func start(store: interop.Reference[prism.Store], root: str, sources: const 
                notifier: interop.Reference[ui.Notifier]? = none) -> interop.Reference[Importer]!:
     let room = try new Room in memory.heap
     errdefer free(room) in memory.heap
+    for path in sources:
+        try room.sources.put_text(path)
+        try room.sources.put_byte('\n')
+    return try begin(room, store, root, folder, notifier)
+
+## Import the photos on camera `at` of `watcher` that the library lacks, as
+## `start` imports files; the camera is connected here, on the main thread, and
+## read on the import thread.
+pub func start_camera(store: interop.Reference[prism.Store], root: str, watcher: interop.Reference[ptp.Watcher], at: i64, folder: i64,
+                      notifier: interop.Reference[ui.Notifier]? = none) -> interop.Reference[Importer]!:
+    return try start_transport(store, root, try (try watcher.get()).connect(at), folder, notifier)
+
+## Import the photos the library lacks from the camera over `transport` (which the
+## importer then owns): a camera a watcher connected, or a virtual one.
+pub func start_transport(store: interop.Reference[prism.Store], root: str, transport: ptp.Transport, folder: i64,
+                         notifier: interop.Reference[ui.Notifier]? = none) -> interop.Reference[Importer]!:
+    let room = new Room(camera = transport) in memory.heap catch failure:
+        transport.close(transport.context)
+        error(failure.code, failure.message)
+    errdefer discard(room)
+    return try begin(room, store, root, folder, notifier)
+
+## Let a room no thread took go.
+func discard(room: Room*):
+    room.close()
+    free(room) in memory.heap
+
+## Start the import thread over `room`, which it then owns.
+func begin(room: Room*, store: interop.Reference[prism.Store], root: str, folder: i64,
+           notifier: interop.Reference[ui.Notifier]?) -> interop.Reference[Importer]!:
     room.folder = folder
     if let told = notifier:
         room.waker = try ui.notify_handle(told)
     try room.root.put_text(root)
-    for path in sources:
-        try room.sources.put_text(path)
-        try room.sources.put_byte('\n')
     room.store = try store.get()
     let handle = try thread.spawn(serve, (void*)room, name = "luced-photo import")
     let importer = try new Importer(room = room, handle = handle, store = store.clone()) in memory.heap

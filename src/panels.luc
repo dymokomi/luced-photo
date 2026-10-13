@@ -25,6 +25,10 @@ from exporter import Exporter
 import exporter
 from export_dialog import ExportDialog
 from luce_std import paths
+from luce_ptp import ptp
+from luce_ptp.ptp import Watcher
+import wakers
+from wakers import CameraWaker
 from luce_develop import geometry
 import rerender
 import remembered
@@ -63,6 +67,9 @@ pub class Panels:
     var showing_soon: bool = false
     ## The workers' notifiers (`connect`).
     var notifiers: list[Notifier] = []
+    ## The cameras plugged in, and what tells the window of them (`connect`).
+    var cameras: Watcher? = none
+    var camera_waker: CameraWaker? = none
     pub var app: Application? = none
 
     pub func init(self, font: Font, root: str) -> unit!:
@@ -78,6 +85,7 @@ pub class Panels:
         self.library_pane = LibraryPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
         self.folders = FoldersPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
         self.folders.on_status = self.tell
+        self.folders.on_camera_import = self.import_camera
         self.folders.on_pick = func (id: int) -> unit!:
             self.library.show_folder(id)
             self.library_pane.refresh()
@@ -357,12 +365,27 @@ pub class Panels:
             return
         self.tell("Looking for photos…")
 
+    ## Import the photos on camera `at` the library lacks.
+    func import_camera(self, at: int) -> unit!:
+        let cameras = self.cameras else return
+        self.library.start_camera_import(cameras, at) catch failure:
+            self.tell(failure.message)
+            return
+        self.tell(f"Reading {cameras.name(at)}…")
+
+    ## A camera came, went or got ready.
+    func cameras_changed(self) -> unit!:
+        let cameras = self.cameras else return
+        self.folders.show_cameras(cameras)
+
     func take_import_events(self) -> unit!:
         for line in self.library.poll_import():
             let fields = line.split("\t")
             match fields[0]:
                 "found":
                     self.tell(f"Importing {fields[1]} files…")
+                "fetching":
+                    self.tell(f"Copying {fields[1]} from the camera ({fields[2]} of {fields[3]})")
                 "added":
                     self.tell(f"Imported {fields[2]} of {fields[3]}: {fields[4]}")
                     # New photos show a few at a time while the import goes on.
@@ -380,7 +403,8 @@ pub class Panels:
                     self.show_new_photos()
                     let skipped = f", {fields[2]} already in the library" if fields[2] != "0" else ""
                     let failed = f", {fields[3]} not imported" if fields[3] != "0" else ""
-                    self.tell(f"Imported {fields[1]} photos{skipped}{failed}.")
+                    let stopped = f" The import stopped: {fields[4]}" if fields.length > 4 and fields[4] != "" else ""
+                    self.tell(f"Imported {fields[1]} photos{skipped}{failed}.{stopped}")
                 "error":
                     self.tell(f"The import stopped: {fields[1]}")
                 _:
@@ -522,7 +546,12 @@ pub class Panels:
         self.rerenderer.wake_with(redone)
         let imported = app.notifier(self.take_import_events)
         self.library.import_notifier = imported
-        self.notifiers = [exported, redone, imported]
+        let cameras = ptp.watch()
+        let plugged = app.notifier(self.cameras_changed)
+        self.camera_waker = wakers.wake_cameras(cameras, plugged)
+        self.cameras = cameras
+        self.cameras_changed()
+        self.notifiers = [exported, redone, imported, plugged]
         self.viewer.on_histogram = func () -> unit!:
             # Read back after this frame, from the loop's next turn.
             _ = app.post(func () -> unit!:
@@ -543,6 +572,12 @@ pub class Panels:
     pub func close(self):
         self.session.flush() catch failure:
             _ = failure
+        # Before the import stops: a camera's transaction waits for this thread,
+        # and closing the watcher lets it go.
+        if let waker = self.camera_waker:
+            waker.close()
+        if let cameras = self.cameras:
+            cameras.close()
         for notifier in self.notifiers:
             notifier.close()
         for connection in self.connections:

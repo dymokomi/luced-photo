@@ -1,0 +1,171 @@
+## Import from a camera twice, the camera being luce-ptp's virtual one serving a
+## folder that holds a Leica DNG and a Fuji RAF (luce-raw's sample raws checked out
+## beside this package; skipped, with the reason, when they are not there). The first
+## import downloads both over PTP into incoming/ and adds them; the second finds each
+## already in the library by name and size and downloads nothing. incoming/ is empty
+## after each. Prints PASS, or what went wrong.
+##
+## `camera --plugged` imports from the first camera plugged in instead, through the
+## watcher, into a temporary library (on macOS, turning the main run loop the
+## watcher and the camera's transactions need), and checks that every photo on it
+## was added.
+import c
+import platform
+import interop
+import strings
+from luce_prism import prism
+from luce_std import files
+from luce_std import paths
+from luce_ptp import ptp
+import importer
+import photo_index
+import library
+
+let samples: str[2] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf"]
+
+## How an import went: photos fetched, added and skipped.
+struct Counts:
+    var fetched: i64
+    var added: i64
+    var skipped: i64
+
+func starts(line: str, word: str) -> bool:
+    return line.length >= word.length and (str)line.bytes[..<word.length] == word
+
+extern var kCFRunLoopDefaultMode: void*
+extern func CFRunLoopRunInMode(mode: void*, seconds: f64, after_source: bool) -> i32
+
+## A turn of the main run loop, where ImageCaptureCore speaks.
+func turn():
+    if platform.macos:
+        _ = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true)
+
+func run_import(store: interop.Reference[prism.Store], root: str, card: str) -> Counts!:
+    return try follow(try importer.start_transport(store, root, try ptp.virtual_camera(card), 0))
+
+## Follow an import to its end, counting what it says.
+func follow(running: interop.Reference[importer.Importer]) -> Counts!:
+    defer running.release()
+    let held = try running.get()
+    var counts = Counts()
+    while true:
+        let finished = held.finished()
+        let events = try held.poll()
+        var first: usize = 0
+        while first < events.length:
+            var end = first
+            while end < events.length and events.bytes[end] != '\n':
+                end += 1
+            let line = (str)events.bytes[first..<end]
+            first = end + 1
+            if starts(line, "fetching\t"):
+                counts.fetched += 1
+            elif starts(line, "added\t"):
+                counts.added += 1
+            elif starts(line, "skipped\t"):
+                counts.skipped += 1
+            elif starts(line, "failed\t") or starts(line, "error\t"):
+                print(f"camera import: {line}")
+            elif starts(line, "done\t"):
+                print(f"camera import: {line}")
+        if finished:
+            break
+        turn()
+    held.close()
+    return counts
+
+## How many entries the library's incoming/ holds.
+func incoming(root: str) -> usize!:
+    let joined = try paths.join(root, "incoming")
+    defer joined.release()
+    let terminated = try strings.copy(joined.value)
+    defer strings.release(terminated)
+    if not files.exists((c.str)terminated):
+        return 0
+    let listed = try files.list((c.str)terminated)
+    defer listed.release()
+    return listed.value.length
+
+func check(root: str, card: str) -> bool!:
+    try library.ensure(root)
+    let catalog_path = try library.catalog_path(root)
+    defer catalog_path.release()
+    let store = try prism.Store.open(catalog_path.value)
+    defer store.release()
+    let first = try run_import(store, root, card)
+    let left = try incoming(root)
+    let second = try run_import(store, root, card)
+    let index = try photo_index.read_index(store)
+    defer index.release()
+    let shown = try index.get()
+    (try store.get()).close()
+    if first.fetched != 2 or first.added != 2 or left != 0 or second.fetched != 0 or second.skipped != 2 or shown.count() != 2:
+        print(f"FAIL camera: first fetched {first.fetched} added {first.added} left {left} in incoming; second fetched {second.fetched} skipped {second.skipped}; library holds {shown.count()}")
+        return false
+    print("PASS camera: two photos downloaded over PTP and imported; the second import downloaded none")
+    return true
+
+## Import from the first camera plugged in, into a library at `root`.
+func plugged(root: str) -> bool!:
+    let watching = try ptp.watch()
+    defer watching.release()
+    let watcher = try watching.get()
+    var turns = 0
+    while (watcher.count() == 0 or not watcher.ready(0)) and turns < 200:
+        turn()
+        turns += 1
+    if watcher.count() == 0 or not watcher.ready(0):
+        print("FAIL camera: no camera plugged in is ready")
+        return false
+    try library.ensure(root)
+    let catalog_path = try library.catalog_path(root)
+    defer catalog_path.release()
+    let store = try prism.Store.open(catalog_path.value)
+    defer store.release()
+    let counts = try follow(try importer.start_camera(store, root, watching, 0, 0))
+    (try store.get()).close()
+    if counts.added == 0 or counts.added != counts.fetched:
+        print(f"FAIL camera: fetched {counts.fetched}, added {counts.added} from {watcher.name(0)}")
+        return false
+    print(f"PASS camera: {counts.added} photos from {watcher.name(0)} downloaded over PTP and imported")
+    return true
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length > 1 and arguments[1] == "--plugged":
+        try files.ensure_directory("build")
+        let folder = try files.create_temporary_directory("build")
+        defer folder.release()
+        let terminated = try strings.copy(folder.value)
+        defer strings.release(terminated)
+        defer files.remove_tree((c.str)terminated) catch failure:
+            _ = failure
+        let root = try paths.join(folder.value, "Plugged.library")
+        defer root.release()
+        return 0 if try plugged(root.value) else 1
+    for sample in samples:
+        let terminated = try strings.copy(sample)
+        defer strings.release(terminated)
+        if not files.exists((c.str)terminated):
+            print("skip: no sample raws in ../luce-raw/build/samples (luce-raw/tests/run.py fetches them)")
+            return 0
+    try files.ensure_directory("build")
+    let folder = try files.create_temporary_directory("build")
+    defer folder.release()
+    let terminated = try strings.copy(folder.value)
+    defer strings.release(terminated)
+    defer files.remove_tree((c.str)terminated) catch failure:
+        _ = failure
+    let card = try paths.join(folder.value, "card")
+    defer card.release()
+    try files.ensure_directory(card.value)
+    for sample in samples:
+        let source_path = try strings.copy(sample)
+        defer strings.release(source_path)
+        let target = try paths.join(card.value, paths.base(sample))
+        defer target.release()
+        let to = try strings.copy(target.value)
+        defer strings.release(to)
+        try files.copy((c.str)source_path, (c.str)to)
+    let root = try paths.join(folder.value, "Camera.library")
+    defer root.release()
+    return 0 if try check(root.value, card.value) else 1

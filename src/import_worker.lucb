@@ -5,6 +5,9 @@
 ## photo is already in the library (by SHA-256, its own import included), the
 ## photo's id, and its file name in originals/ (no two take one name). Each file
 ## ends in a Result the import thread commits to the catalog (importer.lucb).
+## Files may still be arriving while the workers run (downloaded from a camera):
+## a worker with none left waits for the next, and removes a staged file (and the
+## folder it was staged in) once it is through with it.
 import c
 import memory
 import strings
@@ -39,8 +42,15 @@ pub struct Job:
     pub var lock: sync.Mutex
     pub var ready: sync.Condition
     pub var root: str
-    pub var files: const str[]
-    pub var next_file: @usize
+    ## Under lock: the files to import (text in `paths`), the next one a worker
+    ## takes, and whether more may still arrive; `more` is signalled when they do.
+    pub var files: List[str]
+    pub var paths: TextPool
+    pub var next_file: usize
+    pub var arriving: bool
+    pub var more: sync.Condition
+    ## The files are staged copies, removed once imported.
+    pub var staged: bool
     ## Under lock: the library's photos before the import (for their hashes),
     ## the hashes and file names this import has claimed, the next id, results
     ## not taken yet, how many files are finished, and the text of both.
@@ -68,7 +78,42 @@ pub struct Job:
                 return true
         return false
 
+    ## Add `path` to the files to import and wake a waiting worker.
+    pub func arrive(path: str) -> !:
+        self.lock.lock()
+        defer self.lock.unlock()
+        try self.files.append(try self.paths.keep_text(path.bytes))
+        self.more.signal()
+
+    ## No more files will arrive (or the import is cancelled): wake every worker.
+    pub func arrived():
+        self.lock.lock()
+        self.arriving = false
+        self.more.broadcast()
+        self.lock.unlock()
+
+    ## File `at`'s path.
+    pub func file(at: usize) -> str:
+        self.lock.lock()
+        defer self.lock.unlock()
+        return self.files.at(at)
+
+    ## The next file to import, waiting while more may arrive; none when there
+    ## are no more or the import is cancelled.
+    func next() -> usize?:
+        self.lock.lock()
+        defer self.lock.unlock()
+        while self.next_file >= self.files.length() and self.arriving and not self.cancelled.load(.acquire):
+            self.more.wait(&self.lock)
+        if self.next_file >= self.files.length() or self.cancelled.load(.acquire):
+            return none
+        let at = self.next_file
+        self.next_file += 1
+        return at
+
     pub func close():
+        self.files.destroy()
+        self.paths.destroy()
         self.known.close()
         self.hashes.destroy()
         self.names.destroy()
@@ -78,22 +123,37 @@ pub struct Job:
 ## A worker: take files until there are none, or the import is cancelled.
 pub func work(context: void*?):
     let job = (Job*)(context else return)
-    while not job.cancelled.load(.acquire):
-        let at = job.next_file.add(1, .relaxed)
-        if at >= job.files.length:
-            return
+    while true:
+        let at = job.next() else return
+        let file = job.file(at)
         var local: TextPool
         defer local.destroy()
         var result = Result(file = at, outcome = .failed)
         # The failure's message lives only as long as its handler; finish() keeps a copy of this one.
         var held: u8[256]
-        result.outcome = import_file(job, job.files[at], &result.photo, &local) catch failure:
+        result.outcome = import_file(job, file, &result.photo, &local) catch failure:
             result.message = strings.copy_into(held, failure.message)
             recover Outcome.failed
+        if job.staged:
+            unstage(file)
         job.lock.lock()
         finish(job, &result)
         job.lock.unlock()
         job.ready.signal()
+
+## Remove the staged copy at `path` and the folder it was staged in; what cannot
+## be removed stays for the next camera import to clear.
+func unstage(path: str):
+    let file = strings.copy(path) catch failure:
+        return
+    defer strings.release(file)
+    files.remove_file((c.str)file) catch failure:
+        return
+    let folder = strings.copy(paths.directory(path)) catch failure:
+        return
+    defer strings.release(folder)
+    files.remove_directory((c.str)folder) catch failure:
+        _ = failure
 
 ## Keep `result`'s text in the job's pool and hand it to the import thread (under lock).
 func finish(job: Job*, result: Result*):
