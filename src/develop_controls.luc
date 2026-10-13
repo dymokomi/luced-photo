@@ -79,7 +79,7 @@ func gradient_for(name: str) -> str:
 ## Parameters a section's sliders do not show: the wheels hold the grading hues
 ## and saturations, the mixer rows the bands', and switches and menus the rest.
 func by_hand(name: str) -> bool:
-    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "print_material", "print_optical", "film_backing", "develop_agitation"] or name.starts_with("crop_"):
+    if name in ["view", "bw", "geometry_autocrop", "film_stock", "film_format", "film_filter", "film_color_filter", "develop_process", "scan_calibration", "lens_coating", "lens_diffusion", "paper_stock", "paper_enlarger", "paper_surface", "print_material", "print_optical", "film_backing", "develop_agitation"] or name.starts_with("crop_"):
         return true
     if name.starts_with("grade_") and (name.ends_with("_hue") or name.ends_with("_saturation")):
         return true
@@ -246,6 +246,9 @@ pub class DevelopControls:
             specs.insert(2, ParameterSpec(name = "paper_enlarger", label = "Enlarger", kind = ParameterKind.menu,
                                           items = "Diffusion=0|Condenser=1|Contact print=2",
                                           doc = "A condenser prints a silver negative harder (the Callier effect); a contact print has no enlarger flare"))
+            specs.insert(3, ParameterSpec(name = "paper_surface", label = "Surface", kind = ParameterKind.menu,
+                                          items = "Glossy=0|Lustre=1|Matte=2",
+                                          doc = "A matte surface reflects some light before the image: its blacks are lighter (Kodak: D-max 1.7 against glossy's 2.1)"))
         if title == "Lens":
             specs.insert(1, ParameterSpec(name = "lens_coating", label = "Coating", kind = ParameterKind.menu,
                                           items = "Multi-coated=0|Single-coated=1|Uncoated=2",
