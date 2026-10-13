@@ -1,4 +1,4 @@
-## The Presets pane, in the Library mode: the recipes a photo starts from
+## The Presets pane, in the Library mode: the starts a photo begins from
 ## (Television, Cinema, Slide, Black & White, Super Panavision 70…: a chain of
 ## stages and a stock), the library's saved presets (a photo's settings, every
 ## stage's values), and the looks of particular pictures luce-develop documents
@@ -62,11 +62,11 @@ pub class PresetsPane:
         self.rows = ListView([], font = font)
         self.rows.layout().set_flex()
         self.connections.append(self.rows.on_activate(self.apply))
-        self.apply_command = Command("Apply to Selected Photos", id = "recipe_apply")
-        self.update_command = Command("Update with Current Settings", id = "recipe_update")
-        self.rename_command = Command("Rename Preset…", id = "recipe_rename")
-        self.delete_command = Command("Delete Preset…", id = "recipe_delete")
-        self.expose_command = Command("Show in Library…", id = "recipe_expose")
+        self.apply_command = Command("Apply to Selected Photos", id = "preset_apply")
+        self.update_command = Command("Update with Current Settings", id = "preset_update")
+        self.rename_command = Command("Rename Preset…", id = "preset_rename")
+        self.delete_command = Command("Delete Preset…", id = "preset_delete")
+        self.expose_command = Command("Show in Library…", id = "preset_expose")
         self.connections.append(self.expose_command.on_trigger(self.expose_chosen))
         self.expose = ExposeDialog(font)
         self.expose.chosen = self.exposed
@@ -90,7 +90,7 @@ pub class PresetsPane:
         content.layout().set_flex()
         let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("save", self.update_chosen),
                            self.shelf_button("text-tool", self.rename_chosen), Spacer(), self.shelf_button("trash", self.delete_chosen)])
-        self.panel = Panel("Presets", content, minimum = Size(220.0, 120.0), closable = false, footer = shelf, id = "recipes")
+        self.panel = Panel("Presets", content, minimum = Size(220.0, 120.0), closable = false, footer = shelf, id = "presets")
         self.show()
 
     func shelf_button(self, icon: str, callback: func() -> unit!) -> Button!:
@@ -112,15 +112,39 @@ pub class PresetsPane:
         for at in 0..<looks.count():
             items.append(ListItem(text = f"Film · {looks.name(at)}"))
         self.rows.set_items(items)
-        for at in 0..<saved.count():
-            if saved.id(at) == chosen_id:
-                self.rows.select(recipe.mode_total() + at)
+        if chosen_id > 0:
+            self.rows.select(self.row_of(chosen_id))
         self.panel.set_text("Presets" if saved.count() == 0 else f"Presets · {saved.count()}")
+
+    ## The rows are the starts, then the library's presets, then the film
+    ## looks: row `row`'s mark (preset_marks.luc; 0 for none), and the row of
+    ## mark `mark` (-1 for none).
+    pub func mark_of(self, row: int) -> int:
+        let saved = self.library.presets
+        let modes = recipe.mode_total()
+        if row >= 0 and row < modes:
+            return preset_marks.for_start(row)
+        if row >= modes and row < modes + saved.count():
+            return saved.id(row - modes)
+        if row >= modes + saved.count() and row < modes + saved.count() + looks.count():
+            return preset_marks.for_look(row - modes - saved.count())
+        return 0
+    pub func row_of(self, mark: int) -> int:
+        let saved = self.library.presets
+        let modes = recipe.mode_total()
+        if mark > 0:
+            let found = saved.position_of(mark)
+            return modes + found if found >= 0 else -1
+        if preset_marks.start_of(mark) >= 0:
+            return preset_marks.start_of(mark)
+        if preset_marks.look_of(mark) >= 0:
+            return modes + saved.count() + preset_marks.look_of(mark)
+        return -1
 
     ## The library's preset chosen in the list (its position), or -1.
     func chosen(self) -> int:
-        let at = self.rows.selected_index() - recipe.mode_total()
-        return at if at >= 0 and at < self.library.presets.count() else -1
+        let mark = self.mark_of(self.rows.selected_index())
+        return self.library.presets.position_of(mark) if mark > 0 else -1
 
     func fit_menu(self) -> unit!:
         let own = self.chosen() >= 0
@@ -139,48 +163,36 @@ pub class PresetsPane:
     ## Stack row `at` (a start, a preset or a film look) on the selected
     ## photos, as a click does.
     pub func apply(self, at: int) -> unit!:
-        let saved = self.library.presets
-        let modes = recipe.mode_total()
-        self.show_essay(at)
+        let mark = self.mark_of(at)
+        self.show_essay(mark)
         let tell = self.on_apply else return
-        if at >= 0 and at < modes:
-            tell(recipe.mode_name(at), settings.mode_text(at), preset_marks.for_start(at))
-        elif at >= modes and at < modes + saved.count():
-            tell(saved.name(at - modes), saved.settings(at - modes), saved.id(at - modes))
-        elif at >= modes + saved.count() and at < modes + saved.count() + looks.count():
-            let look = at - modes - saved.count()
-            tell(looks.name(look), looks.text(look), preset_marks.for_look(look))
-
-    ## Highlight what the photo shown was last given (its mark, preset_marks.luc),
-    ## or nothing: a highlighted row is always the photo's own, so a click on
-    ## any row shows as a change.
-    pub func follow(self, mark: int) -> unit!:
         let saved = self.library.presets
-        let modes = recipe.mode_total()
-        var row = -1
         if mark > 0:
             let found = saved.position_of(mark)
-            row = modes + found if found >= 0 else -1
+            tell(saved.name(found), saved.settings(found), mark)
         elif preset_marks.start_of(mark) >= 0:
-            row = preset_marks.start_of(mark)
+            let start = preset_marks.start_of(mark)
+            tell(recipe.mode_name(start), settings.mode_text(start), mark)
         elif preset_marks.look_of(mark) >= 0:
-            row = modes + saved.count() + preset_marks.look_of(mark)
+            let look = preset_marks.look_of(mark)
+            tell(looks.name(look), looks.text(look), mark)
+
+    ## Highlight what the photo shown was last given (its mark), or nothing: a
+    ## highlighted row is always the photo's own, so a click on any row shows
+    ## as a change.
+    pub func follow(self, mark: int) -> unit!:
+        let row = self.row_of(mark)
         if row != self.rows.selected_index():
             self.rows.select(row)
-            if row >= 0:
-                self.show_essay(row)
-            else:
-                self.show_essay(-1)
+            self.show_essay(mark)
 
-    ## The essay of row `at`: a start's or a look's (a saved preset has none).
-    func show_essay(self, at: int) -> unit!:
-        let saved = self.library.presets
-        let modes = recipe.mode_total()
+    ## The essay of mark `mark`: a start's or a look's (a saved preset has none).
+    func show_essay(self, mark: int) -> unit!:
         var key = ""
-        if at >= 0 and at < modes:
-            key = f"mode/{essays.slug(recipe.mode_name(at))}"
-        elif at >= modes + saved.count() and at < modes + saved.count() + looks.count():
-            key = f"look/{essays.slug(looks.name(at - modes - saved.count()))}"
+        if preset_marks.start_of(mark) >= 0:
+            key = f"mode/{essays.slug(recipe.mode_name(preset_marks.start_of(mark)))}"
+        elif preset_marks.look_of(mark) >= 0:
+            key = f"look/{essays.slug(looks.name(preset_marks.look_of(mark)))}"
         let title = essays.essay_title(key)
         self.about_title.set_text(title.upper())
         self.about.set_text(essays.essay_text(key))

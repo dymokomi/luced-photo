@@ -3,9 +3,6 @@ from luce_std import files
 import memory
 import strings
 
-pub func parse_value(input_value: str) -> f64!:
-    return try strings.parse_f64(input_value)
-
 pub func save(path: str) -> !:
     let texture = captured_texture else trap("no captured frame")
     let width = uint(texture, sel("width"))

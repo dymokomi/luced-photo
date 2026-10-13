@@ -13,7 +13,6 @@ import strings
 import sync
 import thread
 from luce_std.collections import Buffer, List
-from luce_develop import scene
 from luce_develop import process
 from luce_develop.settings import parse
 from luce_std import files
@@ -75,10 +74,9 @@ func work(context: void*?):
 ## taken for one of these settings.
 func render(job: const Job*, path: Buffer*) -> !:
     let root = job.root
-    var opened = try scene.open(job.original, (usize)library.developed_edge)
-    defer opened.close()
     let settings = parse(job.settings)
-    try opened.turn((i64)settings.get(.geometry_turn))
+    var opened = try process.opened(job.original, &settings, (usize)library.developed_edge)
+    defer opened.close()
     var developed = try process.render(&opened, settings)
     defer developed.close()
     try library.cache_path(root, "developed", job.id, path)

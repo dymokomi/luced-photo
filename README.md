@@ -1,9 +1,9 @@
 # luced-photo
 
-A photo library and RAW editor written in Luce. The window has three panes: a
-grid of your photos whose thumbnails scale, a viewer for the current photo, and
-the photo's recipe as a graph of film stages, and the picked stage's controls. It looks like luced-2d: grey and
-orange docked panes with square buttons. Camera RAWs come through
+A photo library and RAW editor written in Luce, where every photo goes through
+a simulated film process. The window has five modes, a darkroom's rooms in
+order: Library, Capture, Develop, Print and View. It looks like luced-2d: grey
+and orange docked panes with square buttons. Camera RAWs come through
 [luce-raw](https://github.com/dymokomi/luce-raw), which reads Fujifilm X-Trans and
 Bayer RAFs, Leica DNGs and most other cameras' raws. JPEG, PNG, TIFF and HEIC
 files work too.
@@ -37,23 +37,21 @@ Luced Photo.library/
   change the thumbnail size. Arrows move the selection. The Filter menu shows
   picked, rejected or rated photos.
 
-## Recipes
+## Modes and recipes
 
-Each photo goes through a film process, its **recipe**: a small graph of stages
-in the Recipe pane beside the viewer, read top to bottom as luced-3d's network.
-The File (the photo picked in the library) gives light, which passes White
-Balance, Exposure, and, when added, a Lens and a Filter, then exposes a Film
-stock, the film is Developed, and then Scanned, Graded and Viewed, or Printed on
-2383 and Projected, or shown on a Lightbox as a slide; the Easel frames it.
-Wires take the color of what flows on them, and only matching media connect.
-Every control lives in a stage: pick one and Properties shows its controls.
-Boxes are colored by family (source, camera, chemistry, presentation); the left
-strip on a box bypasses it (B), the right one makes it the displayed stage (D).
-Tab or a right click adds stages and starts from a mode; Delete removes one; Alt
-on an input or a Y-drag across wires cuts them. The Recipes pane lists the modes
-(Television, Cinema, Slide, Black & White), your saved recipes and the film
-looks; a click applies one to the selected photos.
-[docs/FILM-GRAPH.md](docs/FILM-GRAPH.md) has the design.
+Each photo goes through a film process, its **recipe**: the file, the camera
+(a White Balance, the Exposure, and when wanted a Lens and a Filter), a Film
+stock and its Development, then an output: a Telecine (scanned, graded, seen on
+a display), a Release Print (printed on 2383 and projected), a Lightbox (a
+slide), a Paper Print, or a Digital Intermediate. The Easel frames it.
+
+The mode bar picks which stages Properties shows: Capture the camera's and the
+film's, Develop the chemistry, Print everything after it (with the Output
+menu), View the display rendering and the frame. Library shows the photos and
+the Presets pane: the starts (Television, Cinema, Slide, Black & White and
+others), your saved presets and the film looks of particular pictures. A click
+gives one to the selected photos. A right-click on a photo copies its film
+preset (everything but its own light and framing) to paste onto others.
 
 ## Where it is going
 

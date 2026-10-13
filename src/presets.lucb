@@ -1,8 +1,8 @@
 ## Presets: named develop settings kept in the library's catalog, beside the
-## photos, in an identity of their own (named "recipes", as it was first):
+## photos, in an identity of their own:
 ##
 ##     /state    next       the id the next preset takes
-##     /r<id>    recipe     id, name, settings (the develop's text form, without
+##     /p<id>    preset     id, name, settings (the develop's text form, without
 ##                          framing: develop_session.luc decides what that is),
 ##                          exposed (the parameters the Library mode shows for a
 ##                          photo with this preset, "|" between)
@@ -12,16 +12,14 @@
 import interop
 import memory
 from luce_prism import prism
-from luce_std.collections import Buffer, TextPool, List
+from luce_std.collections import TextPool, List
+from store_rows import Writer, compare_names, text_of, integer_of
 
-pub let presets_identity: str = "recipes"
+pub let presets_identity: str = "presets"
 
-## What a preset shows in the Library mode unless it says: the exposure and
-## the white balance.
+## What a new preset shows in the Library mode until it is chosen: the
+## exposure and the white balance.
 pub let default_exposed: str = "exposure|temperature|tint"
-
-## How long a commit waits for another writer of the identity.
-let wait_ms: i64 = 2000
 
 pub struct SavedPreset:
     pub var id: i64
@@ -73,33 +71,16 @@ pub struct PresetList:
 
 pub let preset_list_type: interop.Type[PresetList] = interop.Type[PresetList]("PresetList", PresetList.close, closeable = true)
 
-## `a` against `b` as names are listed: ignoring ASCII case, then by bytes.
-func compare_names(a: str, b: str) -> i64:
-    let shorter = a.length if a.length < b.length else b.length
-    for at in 0..<shorter:
-        let x = lower(a.bytes[at])
-        let y = lower(b.bytes[at])
-        if x != y:
-            return -1 if x < y else 1
-    if a.length != b.length:
-        return -1 if a.length < b.length else 1
-    return 0
-
-func lower(byte: u8) -> u8:
-    return byte + 32 if byte >= 'A' and byte <= 'Z' else byte
-
 func collect(context: void*?, view: const prism.RowView*) -> !:
     let into = (PresetList*)(context else error(prism.invalid, "no presets"))
     let path = view.path()
     if path == "/state":
-        into.next = view.integer("next") else into.next
+        into.next = try integer_of(view, "next")
         return
-    if path.length < 3 or path.bytes[1] != 'r':
-        return
-    let id = view.integer("id") else return
-    let name = try into.pool.keep_text((view.text("name") else "").bytes)
-    let settings = try into.pool.keep_text((view.text("settings") else "").bytes)
-    let exposed = try into.pool.keep_text((view.text("exposed") else default_exposed).bytes)
+    let id = try integer_of(view, "id")
+    let name = try into.pool.keep_text((try text_of(view, "name")).bytes)
+    let settings = try into.pool.keep_text((try text_of(view, "settings")).bytes)
+    let exposed = try into.pool.keep_text((try text_of(view, "exposed")).bytes)
     try into.presets.append(SavedPreset(id = id, name = name, settings = settings, exposed = exposed))
     if id >= into.next:
         into.next = id + 1
@@ -125,58 +106,16 @@ pub func read_presets(store: interop.Reference[prism.Store]) -> interop.Referenc
     let made = try new PresetList(presets = list.presets, pool = list.pool, next = list.next) in memory.heap
     return try interop.Reference[PresetList].adopt(made, preset_list_type, memory.heap)
 
-## One session of writes to the presets identity.
-struct Writer:
-    var session: interop.Reference[prism.Session]
-    var path: Buffer
-
-    static func begin(store: prism.Store*) -> Writer!:
-        if not try store.mounted(presets_identity):
-            store.mount(presets_identity) catch failure:
-                if not try store.mounted(presets_identity):
-                    error(failure.code, failure.message)
-        return Writer(session = try store.begin_identity(presets_identity))
-
-    func at(id: i64) -> str!:
-        self.path.clear()
-        try self.path.put(b"/r")
-        try self.path.put_number(id)
-        return self.path.text()
-
-    func text(path: str, name: str, value: str) -> !:
-        let held = try prism.Value.text(value)
-        defer held.release()
-        try (try self.session.get()).set(path, name, held)
-
-    func integer(path: str, name: str, value: i64) -> !:
-        let held = try prism.Value.integer(value)
-        defer held.release()
-        try (try self.session.get()).set(path, name, held)
-
-    func commit() -> !:
-        _ = try (try self.session.get()).commit(wait_ms = wait_ms)
-
-    func close():
-        self.session.release()
-        self.path.destroy()
-
 ## Keep `settings` as the preset named `name`, showing `exposed` in the
 ## Library mode: the one of that name (ignoring case) in `list` takes them,
 ## else a new preset. Its id.
 pub func save_preset(store: interop.Reference[prism.Store], list: interop.Reference[PresetList], name: str, settings: str, exposed: str) -> i64!:
     let known = try list.get()
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), presets_identity, "/p")
     defer writer.close()
     let found = known.position_of_name(name)
     let id = known.id(found) if found >= 0 else known.next
-    let path = try writer.at(id)
-    let session = try writer.session.get()
-    if found < 0:
-        try session.add(path, "recipe")
-        try writer.integer(path, "id", id)
-        if not try session.contains("/state"):
-            try session.add("/state", "state")
-        try writer.integer("/state", "next", id + 1)
+    let path = try writer.add(id, "preset") if found < 0 else try writer.at(id)
     try writer.text(path, "name", name)
     try writer.text(path, "settings", settings)
     try writer.text(path, "exposed", exposed)
@@ -185,7 +124,7 @@ pub func save_preset(store: interop.Reference[prism.Store], list: interop.Refere
 
 ## Show `exposed` ("|" between) in the Library mode for photos with preset `id`.
 pub func set_exposed(store: interop.Reference[prism.Store], id: i64, exposed: str) -> !:
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), presets_identity, "/p")
     defer writer.close()
     let path = try writer.at(id)
     if not try (try writer.session.get()).contains(path):
@@ -195,7 +134,7 @@ pub func set_exposed(store: interop.Reference[prism.Store], id: i64, exposed: st
 
 ## Give preset `id` the name `name`.
 pub func rename_preset(store: interop.Reference[prism.Store], id: i64, name: str) -> !:
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), presets_identity, "/p")
     defer writer.close()
     let path = try writer.at(id)
     if not try (try writer.session.get()).contains(path):
@@ -205,15 +144,10 @@ pub func rename_preset(store: interop.Reference[prism.Store], id: i64, name: str
 
 ## Remove preset `id`.
 pub func delete_preset(store: interop.Reference[prism.Store], id: i64) -> !:
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), presets_identity, "/p")
     defer writer.close()
     let path = try writer.at(id)
     if not try (try writer.session.get()).contains(path):
         return
     try (try writer.session.get()).remove(path)
     try writer.commit()
-
-test "names sort ignoring case":
-    assert(compare_names("apple", "Banana") < 0)
-    assert(compare_names("Mono", "mono") == 0)
-    assert(compare_names("Warm", "Warm 2") < 0)

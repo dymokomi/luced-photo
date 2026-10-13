@@ -6,6 +6,7 @@ import interop
 import memory
 from luce_prism import prism
 import catalog
+import store_rows
 from catalog import Photo
 from luce_std.collections import List, Buffer
 
@@ -32,10 +33,6 @@ pub struct PhotoIndex:
     pub func total() -> i64:
         return (i64)self.rows.photos.length()
 
-    ## The next id an import will give.
-    pub func next_id() -> i64:
-        return self.rows.next
-
     func photo(at: i64) -> Photo:
         if at < 0 or at >= (i64)self.order.length():
             trap("no photo at that position in the library")
@@ -58,16 +55,10 @@ pub struct PhotoIndex:
         return self.photo(at).bytes
     pub func captured(at: i64) -> str:
         return self.photo(at).captured
-    pub func captured_unix(at: i64) -> i64:
-        return self.photo(at).captured_unix
-    pub func offset(at: i64) -> str:
-        return self.photo(at).offset
     pub func width(at: i64) -> i64:
         return self.photo(at).width
     pub func height(at: i64) -> i64:
         return self.photo(at).height
-    pub func orientation(at: i64) -> i64:
-        return self.photo(at).orientation
     pub func make(at: i64) -> str:
         return self.photo(at).make
     pub func model(at: i64) -> str:
@@ -78,14 +69,10 @@ pub struct PhotoIndex:
         return self.photo(at).focal
     pub func aperture(at: i64) -> f64:
         return self.photo(at).aperture
-    pub func exposure(at: i64) -> f64:
-        return self.photo(at).exposure
     pub func shutter(at: i64) -> str:
         return self.photo(at).shutter
     pub func iso(at: i64) -> i64:
         return self.photo(at).iso
-    pub func bias(at: i64) -> f64:
-        return self.photo(at).bias
     pub func rating(at: i64) -> i64:
         return self.photo(at).rating
     pub func flag(at: i64) -> i64:
@@ -97,7 +84,7 @@ pub struct PhotoIndex:
     pub func folder(at: i64) -> i64:
         return self.photo(at).folder
     pub func edited(at: i64) -> bool:
-        return self.photo(at).edited
+        return self.photo(at).settings.length > 0
     ## The develop settings' text form ("" when untouched).
     pub func settings(at: i64) -> str:
         return self.photo(at).settings
@@ -145,7 +132,6 @@ pub struct PhotoIndex:
     pub func set_settings(at: i64, settings: str) -> !:
         let kept = try self.rows.pool.keep_text(settings.bytes)
         self.stored(at).settings = kept
-        self.stored(at).edited = kept.length > 0
 
     ## Show only photos with at least `minimum_rating` stars, the flags `flags`
     ## selects (0 every photo, 1 picked, -1 rejected, 2 all but rejected), label
@@ -158,7 +144,7 @@ pub struct PhotoIndex:
         self.wanted_label = label
         self.search.clear()
         for byte in search.bytes:
-            try self.search.put_byte(byte + 32 if byte >= 'A' and byte <= 'Z' else byte)
+            try self.search.put_byte(store_rows.lower(byte))
         self.search_presets.clear()
         for id in presets:
             try self.search_presets.append(id)
@@ -289,8 +275,7 @@ func holds(text: str, wanted: str) -> bool:
     for start in 0..=(a.length - b.length):
         var all = true
         for at in 0..<b.length:
-            let byte = a[start + at]
-            if (byte + 32 if byte >= 'A' and byte <= 'Z' else byte) != b[at]:
+            if store_rows.lower(a[start + at]) != b[at]:
                 all = false
                 break
         if all:

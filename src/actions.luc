@@ -4,6 +4,7 @@
 ## X reject, U clear the flag, 6–9 red, yellow, green and blue labels.
 from luce_ui.ui import Command, Shortcut
 from luce_window.input import Key
+import modes
 
 pub class Actions:
     # Library
@@ -82,10 +83,9 @@ pub class Actions:
         self.sync_settings = Command("Sync Settings to Selection", Shortcut(Key.s, primary = true, shift = true), id = "sync_settings")
         self.reset_settings = Command("Reset Settings", Shortcut(Key.r, primary = true, shift = true), id = "reset_settings")
         let mode_keys = [Key.digit_1, Key.digit_2, Key.digit_3, Key.digit_4, Key.digit_5]
-        let mode_names = ["Library", "Capture", "Develop", "Print", "View"]
         self.modes = []
         for (at, key) in mode_keys.indexed():
-            self.modes.append(Command(mode_names[at], Shortcut(key, primary = true), id = f"mode_{mode_names[at].lower()}"))
+            self.modes.append(Command(modes.name(at), Shortcut(key, primary = true), id = f"mode_{modes.name(at).lower()}"))
         self.palette = Command("Command Palette…", Shortcut(Key.p, primary = true, shift = true), id = "palette")
         self.reset_layout = Command("Reset Layout", id = "reset_layout")
         self.quit = Command("Quit", Shortcut(Key.q, primary = true), id = "quit")

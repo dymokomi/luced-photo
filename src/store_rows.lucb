@@ -1,0 +1,94 @@
+## What the catalog's identities share (catalog.lucb's photos, presets.lucb,
+## folders.lucb): mounting an identity, writing one row at a time, how long a
+## write waits for another writer, and how names sort.
+import interop
+from luce_prism import prism
+from luce_std.collections import Buffer
+
+## How long a commit or bake waits for another writer of an identity.
+pub let wait_ms: i64 = 2000
+
+## Mount `identity` unless the store has it already.
+pub func mount(store: prism.Store*, identity: str) -> !:
+    if try store.mounted(identity):
+        return
+    store.mount(identity) catch failure:
+        # Another thread may have mounted it between the look and the mount.
+        if not try store.mounted(identity):
+            error(failure.code, failure.message)
+
+## One session of writes to an identity whose rows are `<prefix><id>` ("/f12").
+pub struct Writer:
+    pub var session: interop.Reference[prism.Session]
+    var prefix: str
+    var path: Buffer
+
+    pub static func begin(store: prism.Store*, identity: str, prefix: str) -> Writer!:
+        try mount(store, identity)
+        return Writer(session = try store.begin_identity(identity), prefix = prefix)
+
+    ## Row `id`'s path (valid until the next call).
+    pub func at(id: i64) -> str!:
+        self.path.clear()
+        try self.path.put(self.prefix.bytes)
+        try self.path.put_number(id)
+        return self.path.text()
+
+    pub func text(path: str, name: str, value: str) -> !:
+        let held = try prism.Value.text(value)
+        defer held.release()
+        try (try self.session.get()).set(path, name, held)
+
+    pub func integer(path: str, name: str, value: i64) -> !:
+        let held = try prism.Value.integer(value)
+        defer held.release()
+        try (try self.session.get()).set(path, name, held)
+
+    ## Take the next id: row `id` added as `kind`, and /state's `next` past it.
+    pub func add(id: i64, kind: str) -> str!:
+        let session = try self.session.get()
+        let path = try self.at(id)
+        try session.add(path, kind)
+        try self.integer(path, "id", id)
+        if not try session.contains("/state"):
+            try session.add("/state", "state")
+        try self.integer("/state", "next", id + 1)
+        return try self.at(id)
+
+    pub func commit() -> !:
+        _ = try (try self.session.get()).commit(wait_ms = wait_ms)
+
+    pub func close():
+        self.session.release()
+        self.path.destroy()
+
+## A row's text field `name`, its integer field: every row has every field its
+## writer writes.
+pub func text_of(view: const prism.RowView*, name: str) -> str!:
+    return view.text(name) else error(prism.invalid, "a row in the catalog lacks a text field")
+pub func integer_of(view: const prism.RowView*, name: str) -> i64!:
+    return view.integer(name) else error(prism.invalid, "a row in the catalog lacks a number field")
+pub func number_of(view: const prism.RowView*, name: str) -> f64!:
+    return view.number(name) else error(prism.invalid, "a row in the catalog lacks a number field")
+
+## `a` against `b` as names are listed: ignoring ASCII case, then by bytes.
+pub func compare_names(a: str, b: str) -> i64:
+    let shorter = a.length if a.length < b.length else b.length
+    for at in 0..<shorter:
+        let x = lower(a.bytes[at])
+        let y = lower(b.bytes[at])
+        if x != y:
+            return -1 if x < y else 1
+    if a.length != b.length:
+        return -1 if a.length < b.length else 1
+    return 0
+
+## `byte` in lower case (ASCII).
+pub func lower(byte: u8) -> u8:
+    return byte + 32 if byte >= 'A' and byte <= 'Z' else byte
+
+test "names sort ignoring case":
+    assert(compare_names("apple", "Banana") < 0)
+    assert(compare_names("Mono", "mono") == 0)
+    assert(compare_names("Warm", "Warm 2") < 0)
+    assert(compare_names("2026 Lisbon", "archive") < 0)

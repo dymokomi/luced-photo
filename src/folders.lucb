@@ -10,12 +10,10 @@
 import interop
 import memory
 from luce_prism import prism
-from luce_std.collections import TextPool, List, Buffer
+from luce_std.collections import TextPool, List
+from store_rows import Writer, compare_names, text_of, integer_of
 
 pub let folders_identity: str = "folders"
-
-## How long a commit waits for another writer of the identity.
-let wait_ms: i64 = 2000
 
 pub struct Folder:
     pub var id: i64
@@ -70,32 +68,15 @@ pub struct FolderList:
 
 pub let folder_list_type: interop.Type[FolderList] = interop.Type[FolderList]("FolderList", FolderList.close, closeable = true)
 
-## `a` against `b` as names are listed: ignoring ASCII case, then by bytes.
-func compare_names(a: str, b: str) -> i64:
-    let shorter = a.length if a.length < b.length else b.length
-    for at in 0..<shorter:
-        let x = lower(a.bytes[at])
-        let y = lower(b.bytes[at])
-        if x != y:
-            return -1 if x < y else 1
-    if a.length != b.length:
-        return -1 if a.length < b.length else 1
-    return 0
-
-func lower(byte: u8) -> u8:
-    return byte + 32 if byte >= 'A' and byte <= 'Z' else byte
-
 func collect(context: void*?, view: const prism.RowView*) -> !:
     let into = (FolderList*)(context else error(prism.invalid, "no folders"))
     let path = view.path()
     if path == "/state":
-        into.next = view.integer("next") else into.next
+        into.next = try integer_of(view, "next")
         return
-    if path.length < 3 or path.bytes[1] != 'f':
-        return
-    let id = view.integer("id") else return
-    let name = try into.pool.keep_text((view.text("name") else "").bytes)
-    try into.folders.append(Folder(id = id, name = name, parent = view.integer("parent") else 0))
+    let id = try integer_of(view, "id")
+    let name = try into.pool.keep_text((try text_of(view, "name")).bytes)
+    try into.folders.append(Folder(id = id, name = name, parent = try integer_of(view, "parent")))
     if id >= into.next:
         into.next = id + 1
 
@@ -120,62 +101,21 @@ pub func read_folders(store: interop.Reference[prism.Store]) -> interop.Referenc
     let made = try new FolderList(folders = list.folders, pool = list.pool, next = list.next) in memory.heap
     return try interop.Reference[FolderList].adopt(made, folder_list_type, memory.heap)
 
-## One session of writes to the folders identity.
-struct Writer:
-    var session: interop.Reference[prism.Session]
-    var path: Buffer
-
-    static func begin(store: prism.Store*) -> Writer!:
-        if not try store.mounted(folders_identity):
-            store.mount(folders_identity) catch failure:
-                if not try store.mounted(folders_identity):
-                    error(failure.code, failure.message)
-        return Writer(session = try store.begin_identity(folders_identity))
-
-    func at(id: i64) -> str!:
-        self.path.clear()
-        try self.path.put(b"/f")
-        try self.path.put_number(id)
-        return self.path.text()
-
-    func text(path: str, name: str, value: str) -> !:
-        let held = try prism.Value.text(value)
-        defer held.release()
-        try (try self.session.get()).set(path, name, held)
-
-    func integer(path: str, name: str, value: i64) -> !:
-        let held = try prism.Value.integer(value)
-        defer held.release()
-        try (try self.session.get()).set(path, name, held)
-
-    func commit() -> !:
-        _ = try (try self.session.get()).commit(wait_ms = wait_ms)
-
-    func close():
-        self.session.release()
-        self.path.destroy()
-
 ## A new folder named `name` in folder `parent` (0: at the top); its id.
 pub func make_folder(store: interop.Reference[prism.Store], list: interop.Reference[FolderList], name: str, parent: i64) -> i64!:
     let known = try list.get()
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
     defer writer.close()
     let id = known.next
-    let path = try writer.at(id)
-    let session = try writer.session.get()
-    try session.add(path, "folder")
-    try writer.integer(path, "id", id)
+    let path = try writer.add(id, "folder")
     try writer.text(path, "name", name)
     try writer.integer(path, "parent", parent)
-    if not try session.contains("/state"):
-        try session.add("/state", "state")
-    try writer.integer("/state", "next", id + 1)
     try writer.commit()
     return id
 
 ## Give folder `id` the name `name`.
 pub func rename_folder(store: interop.Reference[prism.Store], id: i64, name: str) -> !:
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
     defer writer.close()
     let path = try writer.at(id)
     let session = try writer.session.get()
@@ -186,7 +126,7 @@ pub func rename_folder(store: interop.Reference[prism.Store], id: i64, name: str
 
 ## Put folder `id` into folder `parent` (0: at the top).
 pub func move_folder(store: interop.Reference[prism.Store], id: i64, parent: i64) -> !:
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
     defer writer.close()
     let path = try writer.at(id)
     let session = try writer.session.get()
@@ -197,7 +137,7 @@ pub func move_folder(store: interop.Reference[prism.Store], id: i64, parent: i64
 
 ## Remove folder `id`; the caller moves what it held (photos, folders) first.
 pub func delete_folder(store: interop.Reference[prism.Store], id: i64) -> !:
-    var writer = try Writer.begin(try store.get())
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
     defer writer.close()
     let path = try writer.at(id)
     let session = try writer.session.get()
@@ -205,7 +145,3 @@ pub func delete_folder(store: interop.Reference[prism.Store], id: i64) -> !:
         return
     try session.remove(path)
     try writer.commit()
-
-test "names sort ignoring case":
-    assert(compare_names("2026 Lisbon", "archive") < 0)
-    assert(compare_names("Family", "family") == 0)

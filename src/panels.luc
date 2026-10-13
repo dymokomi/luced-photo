@@ -108,7 +108,7 @@ pub class Panels:
         self.session.on_status = self.tell
         self.session.on_requested = self.show_activity
         self.presets = PresetsPane(self.library, font)
-        self.presets.current = self.session.recipe_text
+        self.presets.current = self.session.preset_text
         self.presets.on_status = self.tell
         self.presets.on_apply = func (name: str, text: str, id: int) -> unit!:
             let picked = self.library_pane.selection()
@@ -238,6 +238,10 @@ pub class Panels:
         for (mode, command) in actions.modes.indexed():
             self.connections.append(command.on_trigger(func () -> unit!:
                 self.set_mode(mode)))
+        # The current mode's panes back where they start.
+        self.connections.append(actions.reset_layout.on_trigger(func () -> unit!:
+            self.dock.set_fraction(self.viewer.panel, 0.74)
+            self.arrange(self.mode)))
         self.connections.append(actions.palette.on_trigger(func () -> unit!:
             self.palette.open()))
         self.connections.append(actions.quit.on_trigger(func () -> unit!:

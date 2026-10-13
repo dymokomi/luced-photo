@@ -104,8 +104,6 @@ The viewer runs on the GPU and re-renders on every slider move.
   2. Separable blur, two passes.
   3. Develop: stages 1–9.
   4. Draw into the view rectangle with zoom and pan.
-
-  Before/after reuses pass 4 with a split position.
 - The histogram is computed on the CPU from a readback of a small (256²) render.
   This runs after edits settle, not on every frame.
 
@@ -127,17 +125,15 @@ Catalog identities (luce-prism):
 
 | identity | element | properties |
 | --- | --- | --- |
-| `photos` | `/p<id>` | path, name, format, bytes, sha256, imported, captured, offset, width, height, orientation, make, model, lens, focal, aperture, shutter, iso, exposure_bias, gps, rating, flag, label, keywords, edited |
-| `edits` | `/p<id>` | one property per develop setting that differs from the default |
-| `recipes` | `/r<id>` | id, name, settings (text form, without framing); `/state` next id |
-| `albums` | `/a<id>` | name, order, members (int list) |
-| `library` | `/state` | schema version, last import, grid size |
+| `photos` | `/p<id>` | id, path, name, kind, bytes, sha256, imported, captured, captured_unix, offset, width, height, orientation, make, model, lens, focal, aperture, exposure, shutter, iso, bias, rating, flag, label, preset, folder, settings (the develop's text form); `/state` next id |
+| `presets` | `/p<id>` | id, name, settings (text form, without framing), exposed; `/state` next id |
+| `folders` | `/f<id>` | id, name, parent; `/state` next id |
 
 - **Import** runs on a Base worker thread, like luced-message's engines. For each
   file it hashes the contents (SHA-256, which also catches duplicates), copies the
   file into `originals/YYYY/MM/DD/` by capture date, reads the EXIF, and extracts
   the embedded preview or decodes a small image. Then it writes the thumbnail and
-  commits a batch of rows. The window polls the worker's events through a timer.
+  commits a batch of rows. The worker wakes the window, which takes its events.
 - **Thumbnails** come from the embedded JPEG (luce-raw `preview`, under 1 ms)
   until the photo has edits. After an edit, the CPU path renders a 512 px
   thumbnail in the background.
@@ -164,13 +160,13 @@ shortcuts and the command palette.
   flag, 6–9 set the label.
 - **Viewer.** Fit or 100 % (space or Z). A mouse wheel, a pinch or a
   modifier-scroll zooms about the pointer; touchpad scrolling and middle- or
-  left-dragging pan, as in luced-2d's canvas; a before/after split
-  (Y), a clipping overlay (J), and a film strip along the bottom showing the
-  library's current filter.
-- **Recipe pane**, below the Viewer: the photo's film process as a graph of
-  stages (docs/FILM-GRAPH.md). Every control lives in a stage.
-- **Properties pane.** The histogram and capture info, then the picked
-  stage's controls in collapsible sections, each with a reset button: White
+  left-dragging pan, as in luced-2d's canvas; a clipping overlay (J), and a
+  film strip along the bottom showing the library's current filter.
+- **Modes.** Library, Capture, Develop, Print and View (Cmd-1 to 5) pick the
+  stages of the photo's recipe Properties shows (luce-develop's recipe.lucb:
+  an output and the optional White Balance, Lens and Filter).
+- **Properties pane.** The histogram and capture info, then the mode's
+  stages' controls in collapsible sections, each with a reset button: White
   Balance, Exposure, Lens, Filter, Film, Develop, Scan; the Grade's Tone,
   Levels, Curves, Color, Color Mixer, Color Grading and Black & White; View;
   the Easel's Vignette, Geometry and Crop.
@@ -178,13 +174,13 @@ shortcuts and the command palette.
   undo step, with drags coalesced. Copy/paste settings, sync to the selection,
   and reset are supported. None of them carries framing (perspective, crop,
   guides) from one photo to another.
-- **Recipes pane**, below the Library: the modes (Television, Cinema, Slide,
-  Black & White), the saved recipes, kept in the catalog so they travel with
-  the library, and the film looks. A click stacks one on the selected photos,
-  as Capture One's styles do: the values it holds replace the photo's, and the
-  rest stay. Each photo changed gets an undo step. The footer saves the
-  developed photo's recipe as a new one, saves it over the chosen one, renames
-  it and deletes it. A right-click on a row offers the same.
+- **Presets pane**, in the Library mode: the starts (Television, Cinema, Slide,
+  Black & White and others), the saved presets, kept in the catalog so they
+  travel with the library, and the film looks. A click stacks one on the
+  selected photos, as Capture One's styles do: the values it holds replace the
+  photo's, and the rest stay. Each photo changed gets an undo step. The footer
+  saves the developed photo's settings as a new preset, saves them over the
+  chosen one, renames it and deletes it. A right-click on a row offers the same.
 - **Export** runs the CPU path to JPEG, TIFF 16-bit or PNG, in sRGB, Display P3 or
   Rec.2020, with a resize option. It runs on a worker, with progress shown in the
   status line.

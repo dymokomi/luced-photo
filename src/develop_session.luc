@@ -1,10 +1,11 @@
 ## The develop session: the photo whose develop the controls show; saving it a
 ## moment after edits settle (so a drag is one change, not hundreds); undo and
 ## redo, a history per photo; and settings carried between photos — Copy and
-## Paste, Sync from the lead photo to the rest of the selection, Reset, and
-## recipes. The recipe (the graph of film stages) is part of the settings, so
-## undo, copying and recipes carry it too. Geometry (perspective, crop, guides) belongs to one photo's framing:
-## copying leaves it out and pasting keeps the target's own. A recipe stacks, as
+## Paste, Sync from the lead photo to the rest of the selection, Reset, film
+## presets, and presets. The recipe (the photo's film process) is part of the
+## settings, so undo, copying and presets carry it too. Geometry (perspective,
+## crop, guides) belongs to one photo's framing: copying leaves it out and
+## pasting keeps the target's own. A preset stacks, as
 ## Capture One's styles do: what it sets replaces the photo's, the rest stays.
 from photo_library import PhotoLibrary
 from develop_controls import DevelopControls
@@ -45,9 +46,12 @@ func name_in(part: str) -> str:
 func own_sections() -> list[str]:
     return ["White Balance", "Exposure", "Geometry", "Crop"]
 
-## The curves' names in the text form (luce-develop's settings.curve_names).
+## The curves' names in the text form.
 func curve_names() -> list[str]:
-    return ["curve_rgb", "curve_red", "curve_green", "curve_blue", "curve_luma"]
+    var names: list[str] = []
+    for at in 0..<settings.curve_total():
+        names.append(settings.curve_name(at))
+    return names
 
 ## Settings `text`'s film preset: its recipe and every parameter of the stages
 ## from the lens to the print and the grade, each named even at its default
@@ -72,11 +76,11 @@ func film_part(text: str) -> str!:
     parts.append(look.recipe_text())
     return parts.join(";")
 
-## Recipe `recipe` stacked on settings `target`: the recipe's values replace
+## Preset `preset` stacked on settings `target`: the preset's values replace
 ## the target's of those names, the target's others and its framing stay. In
 ## the text form's own order, so an unchanged photo compares equal.
-func stacked(recipe: str, target: str) -> str!:
-    let laid = parts_of(recipe, false)
+func stacked(preset: str, target: str) -> str!:
+    let laid = parts_of(preset, false)
     var named: set[str] = {}
     for part in laid:
         named.insert(name_in(part))
@@ -314,12 +318,12 @@ pub class DevelopSession:
         self.tell(f"Pasted the film preset onto {changed} photo{"" if changed == 1 else "s"}." if changed > 0 else "The film preset changes nothing here.")
         return changed
 
-    # mark: recipes ===========================================================================
+    # mark: presets ===========================================================================
 
-    ## The developed photo's settings as a saved recipe holds them: without its
-    ## framing, and naming its graph even when it is the default one; none
+    ## The developed photo's settings as a saved preset holds them: without its
+    ## framing, and naming its recipe even when it is the default one; none
     ## without a developed photo.
-    pub func recipe_text(self) -> str?!:
+    pub func preset_text(self) -> str?!:
         self.flush()
         if self.developing < 0:
             return none
@@ -328,10 +332,10 @@ pub class DevelopSession:
             parts.append(self.controls.look.recipe_text())
         return parts.join(";")
 
-    ## Stack recipe `name`, settings `text`, on the photos at `positions`.
+    ## Stack preset `name`, settings `text`, on the photos at `positions`.
     pub func apply_preset(self, positions: list[int], name: str, text: str) -> unit!:
         if positions.length == 0:
-            self.tell("Select photos to apply a recipe to.")
+            self.tell("Select photos to apply a preset to.")
             return
         let changed = self.give(positions, text, stack = true)
         self.tell(f"Applied “{name}” to {changed} photo{"" if changed == 1 else "s"}." if changed > 0 else f"“{name}” changes nothing here.")

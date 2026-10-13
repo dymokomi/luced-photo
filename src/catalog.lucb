@@ -6,7 +6,7 @@
 ##                                    bytes, sha256, imported, captured, captured_unix,
 ##                                    offset, width, height, orientation, make, model,
 ##                                    lens, focal, aperture, exposure, shutter, iso,
-##                                    bias, rating, flag, label, edited, settings
+##                                    bias, rating, flag, label, preset, folder, settings
 ##                                    (the develop's text form, luce-develop
 ##                                    settings.text_of; "" when untouched)
 ##
@@ -15,13 +15,12 @@
 import interop
 import memory
 from luce_prism import prism
+from store_rows import wait_ms, text_of, integer_of, number_of
+import store_rows
 from luce_std.collections import Buffer, TextPool, List
 
 ## The identity every photo row lives in.
 pub let photos_identity: str = "photos"
-
-## How long a commit or bake waits for another writer of the identity.
-let wait_ms: i64 = 2000
 
 ## One photo, as the catalog stores it; text fields are views of their owner.
 pub struct Photo:
@@ -59,7 +58,6 @@ pub struct Photo:
     pub var preset: i64
     ## The library folder it is in (folders.lucb's id), 0 none.
     pub var folder: i64
-    pub var edited: bool
     pub var settings: str
 
 ## The element path of photo `id`, onto `out`.
@@ -70,12 +68,7 @@ func photo_path(id: i64, out: Buffer*) -> !:
 
 ## Mount the photos identity unless the store has it already.
 pub func ensure(store: prism.Store*) -> !:
-    if try store.mounted(photos_identity):
-        return
-    store.mount(photos_identity) catch failure:
-        # Another thread may have mounted it between the look and the mount.
-        if not try store.mounted(photos_identity):
-            error(failure.code, failure.message)
+    try store_rows.mount(store, photos_identity)
 
 ## One commit's worth of writes to the photos identity.
 pub struct Batch:
@@ -148,7 +141,6 @@ pub struct Batch:
         try self.integer(path, "label", photo.label)
         try self.integer(path, "preset", photo.preset)
         try self.integer(path, "folder", photo.folder)
-        try self.boolean(path, "edited", photo.edited)
         try self.text(path, "settings", photo.settings)
         self.count += 1
 
@@ -162,15 +154,13 @@ pub struct Batch:
         try self.integer(path, name, value)
         self.count += 1
 
-    ## Store photo `id`'s develop settings (text form); it counts as edited
-    ## unless the text is empty.
+    ## Store photo `id`'s develop settings (text form).
     pub func set_settings(id: i64, settings: str) -> !:
         try photo_path(id, &self.path)
         let path = self.path.text()
         if not try (try self.session_of()).contains(path):
             return
         try self.text(path, "settings", settings)
-        try self.boolean(path, "edited", settings.length > 0)
         self.count += 1
 
     ## Record that the next photo takes id `next`.
@@ -221,32 +211,32 @@ pub struct Rows:
         self.photos.destroy()
         self.pool.destroy()
 
+## A photo row's text field `name`, kept in `into`'s pool.
 func kept(into: Rows*, view: const prism.RowView*, name: str) -> str!:
-    return try into.pool.keep_text((view.text(name) else "").bytes)
+    return try into.pool.keep_text((try text_of(view, name)).bytes)
 
 func collect(context: void*?, view: const prism.RowView*) -> !:
     let into = (Rows*)(context else error(prism.invalid, "no rows"))
     let path = view.path()
     if path == "/state":
-        into.next = view.integer("next") else into.next
+        into.next = try integer_of(view, "next")
         return
     if path.length < 3 or path.bytes[1] != 'p':
         return
-    let id = view.integer("id") else return
     try into.photos.append(Photo(
-        id = id, path = try kept(into, view, "path"), name = try kept(into, view, "name"),
-        kind = try kept(into, view, "kind"), bytes = view.integer("bytes") else 0,
-        sha256 = try kept(into, view, "sha256"), imported = view.integer("imported") else 0,
-        captured = try kept(into, view, "captured"), captured_unix = view.integer("captured_unix") else 0,
-        offset = try kept(into, view, "offset"), width = view.integer("width") else 0,
-        height = view.integer("height") else 0, orientation = view.integer("orientation") else 1,
+        id = try integer_of(view, "id"), path = try kept(into, view, "path"), name = try kept(into, view, "name"),
+        kind = try kept(into, view, "kind"), bytes = try integer_of(view, "bytes"),
+        sha256 = try kept(into, view, "sha256"), imported = try integer_of(view, "imported"),
+        captured = try kept(into, view, "captured"), captured_unix = try integer_of(view, "captured_unix"),
+        offset = try kept(into, view, "offset"), width = try integer_of(view, "width"),
+        height = try integer_of(view, "height"), orientation = try integer_of(view, "orientation"),
         make = try kept(into, view, "make"), model = try kept(into, view, "model"),
-        lens = try kept(into, view, "lens"), focal = view.number("focal") else 0.0,
-        aperture = view.number("aperture") else 0.0, exposure = view.number("exposure") else 0.0,
-        shutter = try kept(into, view, "shutter"), iso = view.integer("iso") else 0,
-        bias = view.number("bias") else 0.0, rating = view.integer("rating") else 0,
-        flag = view.integer("flag") else 0, label = view.integer("label") else 0, preset = view.integer("preset") else 0, folder = view.integer("folder") else 0,
-        edited = view.boolean("edited") else false, settings = try kept(into, view, "settings")))
+        lens = try kept(into, view, "lens"), focal = try number_of(view, "focal"),
+        aperture = try number_of(view, "aperture"), exposure = try number_of(view, "exposure"),
+        shutter = try kept(into, view, "shutter"), iso = try integer_of(view, "iso"),
+        bias = try number_of(view, "bias"), rating = try integer_of(view, "rating"),
+        flag = try integer_of(view, "flag"), label = try integer_of(view, "label"), preset = try integer_of(view, "preset"), folder = try integer_of(view, "folder"),
+        settings = try kept(into, view, "settings")))
 
 ## Every photo in the catalog, in the order they were added.
 pub func read(store: prism.Store*) -> Rows!:

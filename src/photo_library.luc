@@ -1,5 +1,5 @@
 ## The library the window shows: the bundle on disk, its catalog, the index of
-## photos the panes read, the develop recipes, and the import that may be running. The panes never
+## photos the panes read, the develop presets, and the import that may be running. The panes never
 ## touch the catalog themselves; they ask the library.
 from luce_prism import prism
 from luce_ui.ui import Notifier

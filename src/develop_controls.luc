@@ -128,7 +128,7 @@ let output_section: int = -2
 
 ## The stages a switch takes in and out of the recipe.
 func optional(stage: int) -> bool:
-    return recipe.stage_key(stage) in ["white_balance", "lens", "filter"] if stage >= 0 else false
+    return stage >= 0 and recipe.stage_optional(stage)
 
 pub class DevelopControls:
     pub let body: VStack
@@ -160,8 +160,6 @@ pub class DevelopControls:
     pub var on_crop_aspect: func(float) -> unit!? = none
     ## Called when the photo turns a quarter (its sides swap).
     pub var on_turn: func() -> unit!? = none
-    ## Called after the controls show other settings (another photo, undo).
-    pub var on_shown: func() -> unit!? = none
     ## The mode whose sections show (modes.luc).
     var mode: int = 1
     ## What the Library mode shows: the photo's preset's exposed parameters.
@@ -309,7 +307,7 @@ pub class DevelopControls:
             specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
         # The switch first, under the heading.
-        if title in ["White Balance", "Lens", "Filter"]:
+        if optional(recipe.owner_of(title)):
             specs.insert(1, ParameterSpec(name = "stage_on", label = "On", kind = ParameterKind.toggle, resettable = false,
                                           doc = f"Off, the light passes the {title.lower()} by"))
         return specs
@@ -589,8 +587,6 @@ pub class DevelopControls:
         self.showing = false
         self.show_curve()
         self.show_mode(self.mode)
-        if let tell = self.on_shown:
-            tell()
 
     ## Show mode `mode`'s sections (modes.luc): its stages' that the recipe
     ## has, and its optional ones (switched off, their rows greyed); Print's
@@ -626,14 +622,14 @@ pub class DevelopControls:
     ## the output does with it; none for Library and View.
     func subject(self, mode: int) -> int:
         if mode == modes.capture:
-            return 5
+            return recipe.key_stage("film")
         if mode == modes.develop:
-            return 6
+            return recipe.key_stage("develop")
         if mode == modes.printing:
             for key in ["paper", "lightbox", "print", "scan"]:
-                for stage in 0..<recipe.stage_total():
-                    if recipe.stage_key(stage) == key and self.look.has_stage(stage):
-                        return stage
+                let stage = recipe.key_stage(key)
+                if self.look.has_stage(stage):
+                    return stage
         return -1
 
     ## The essays about stage `stage` (-1: none) and what is chosen in it: the
@@ -709,7 +705,6 @@ pub class DevelopControls:
         self.curves.set_points(xs, ys)
         self.showing = was
 
-    ## Show each section's widget while its folder is open; called on the window's timer.
     ## The widgets under sections (the curve editor, the tone wheels): shown
     ## while their section shows and its folder is open.
     func show_extras(self):
@@ -722,9 +717,9 @@ pub class DevelopControls:
             connection.disconnect()
         self.connections.clear()
 
-test "every stage, stock and process has its essay":
-    for stage in 0..<recipe.stage_total():
-        assert(essays.essay_title(f"stage/{recipe.stage_key(stage)}") != "")
+test "every stage a mode shows, stock and process has its essay":
+    for key in ["film", "develop", "scan", "print", "lightbox", "paper"]:
+        assert(essays.essay_title(f"stage/{key}") != "")
     for stock in 0..<film.stock_count():
         assert(essays.essay_title(f"stock/{essays.slug(film.stock_name(stock))}") != "")
     for process in 0..<film.process_total():

@@ -111,4 +111,6 @@ test "every stage belongs to a mode, in the process's order":
     for stage in 0..<recipe.stage_total():
         let mode = of_stage(stage)
         assert(mode >= capture and mode <= viewing)
-    assert(of_stage(5) == capture and of_stage(6) == develop and of_stage(9) == printing and of_stage(13) == viewing)
+    assert(of_stage(recipe.key_stage("film")) == capture and of_stage(recipe.key_stage("develop")) == develop)
+    assert(of_stage(recipe.key_stage("print")) == printing and of_stage(recipe.key_stage("paper")) == printing)
+    assert(of_stage(recipe.key_stage("easel")) == viewing)

@@ -30,7 +30,7 @@ pub func main(arguments: str[]) -> i32!:
 
 ## The round trip, in `folder`.
 func check(folder: str) -> !:
-    let path = try paths.join(folder, "recipes.prism")
+    let path = try paths.join(folder, "presets.prism")
     defer path.release()
     var store = try prism.Store.open(path.value)
     var list = try names(store)

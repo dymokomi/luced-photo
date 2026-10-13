@@ -62,9 +62,8 @@ pub class LibraryPane:
     var connections: list[Connection] = []
     ## The filter commands, for the Filter menu.
     pub let filters: list[Command]
-    ## Called with the lead item when the selection changes, and on a double-click.
+    ## Called with the lead item when the selection changes.
     pub var on_pick: func(int) -> unit!? = none
-    pub var on_open: func(int) -> unit!? = none
 
     ## `imports` are the empty library's buttons; `photo_commands` the photos'
     ## right-click menu (a right-click selects the photo under it first).
@@ -97,9 +96,6 @@ pub class LibraryPane:
         self.connections.append(self.grid.on_select(func (lead: int) -> unit!:
             if let pick = self.on_pick:
                 pick(lead)))
-        self.connections.append(self.grid.on_activate(func (lead: int) -> unit!:
-            if let open = self.on_open:
-                open(lead)))
         self.list = TableView([TableColumn(title = "Name", weight = 2.0), TableColumn(title = "Captured", width = 150.0),
                                TableColumn(title = "Camera", weight = 1.0), TableColumn(title = "Lens", weight = 1.0),
                                TableColumn(title = "Rating", width = 70.0), TableColumn(title = "Preset", weight = 1.0)],
