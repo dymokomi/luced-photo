@@ -60,6 +60,9 @@ pub class LibraryPane:
     var connections: list[Connection] = []
     ## The filter commands, for the Filter menu.
     pub let filters: list[Command]
+    ## A library just opened shows its newest photos (the last, by capture
+    ## time) once the grid has its size: the first visible range it reports.
+    var newest_wanted: bool = true
     ## Called with the lead item when the selection changes.
     pub var on_pick: func(int) -> unit!? = none
 
@@ -192,6 +195,7 @@ pub class LibraryPane:
         self.pictures = {}
         self.aspects = {}
         self.grid.select(-1)
+        self.newest_wanted = true
         self.refresh()
 
     ## The tile shape of the photo at `at`: its thumbnail's once seen, else
@@ -316,6 +320,11 @@ pub class LibraryPane:
     ## Ask for the thumbnails of the cells on screen and a few rows around
     ## them, and let go of those far from it.
     func load_visible(self) -> unit!:
+        if self.newest_wanted and self.grid.item_count() > 0 and self.grid.layout().bounds().height > 0.0:
+            self.newest_wanted = false
+            # Revealing reports the new range, which comes back here.
+            self.grid.reveal(self.grid.item_count() - 1)
+            return
         let first = self.grid.first_visible()
         let last = self.grid.last_visible()
         if last <= first:
