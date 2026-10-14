@@ -322,9 +322,12 @@ pub class LibraryPane:
     func load_visible(self) -> unit!:
         if self.newest_wanted and self.grid.item_count() > 0 and self.grid.layout().bounds().height > 0.0:
             self.newest_wanted = false
-            # Revealing reports the new range, which comes back here.
+            # A reveal that scrolls reports the new range, which comes back here;
+            # when the newest already show (a small library), nothing reports.
+            let before = self.grid.first_visible()
             self.grid.reveal(self.grid.item_count() - 1)
-            return
+            if self.grid.first_visible() != before:
+                return
         let first = self.grid.first_visible()
         let last = self.grid.last_visible()
         if last <= first:
