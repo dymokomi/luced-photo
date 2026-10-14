@@ -1,7 +1,7 @@
 #prisma 4.0
 def package "luced-photo" {
     str owner = "dymokomi"
-    str version = "0.1.0"
+    str version = "0.1.1"
     str kind = "application"
     str language = "luce"
     str description = "A photo library and RAW editor written in Luce: a scalable grid of your photos, a viewer with the develop applied and one long column of corrections, over a managed library kept in luce-prism."
