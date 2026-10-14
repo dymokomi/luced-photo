@@ -156,7 +156,9 @@ pub class PresetsPane:
     func add_row(self, items: list[ListItem], name: str, mark: str) -> unit!:
         self.row_marks.append(mark)
         self.row_folders.append(0)
-        items.append(ListItem(text = "   " + name))
+        # Past the folder's icon and further: a folder's name starts where an
+        # unindented row's would after the icon, so its rows go deeper.
+        items.append(ListItem(text = "      " + name))
 
     ## Row `row`'s mark ("" for a folder or none), and the row of mark `mark` (-1 none).
     pub func mark_of(self, row: int) -> str:
