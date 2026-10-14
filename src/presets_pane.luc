@@ -127,21 +127,21 @@ pub class PresetsPane:
         self.add_folder(items, starts_folder, "Starts")
         if not (starts_folder in self.closed):
             for at in 0..<recipe.mode_total():
-                self.add_row(items, recipe.mode_name(at), preset_marks.for_start(at), "filter", 1)
+                self.add_row(items, recipe.mode_name(at), preset_marks.for_start(at), "film-strip", 1)
         self.add_folder(items, looks_folder, "Film Looks")
         if not (looks_folder in self.closed):
             for at in 0..<looks.count():
-                self.add_row(items, looks.name(at), preset_marks.for_look(at), "color-correction", 1)
+                self.add_row(items, looks.name(at), preset_marks.for_look(at), "movie-camera", 1)
         for folder in 0..<saved.folder_count():
             let id = saved.folder_id(folder)
             self.add_folder(items, id, saved.folder_name(folder))
             if not (id in self.closed):
                 for at in 0..<saved.count():
                     if saved.folder(at) == id:
-                        self.add_row(items, saved.name(at), preset_marks.for_saved(saved.id(at)), "color-swatch", 1)
+                        self.add_row(items, saved.name(at), preset_marks.for_saved(saved.id(at)), "film-strip", 1)
         for at in 0..<saved.count():
             if saved.folder(at) == 0:
-                self.add_row(items, saved.name(at), preset_marks.for_saved(saved.id(at)), "color-swatch", 0)
+                self.add_row(items, saved.name(at), preset_marks.for_saved(saved.id(at)), "film-strip", 0)
         self.rows.set_items(items)
         self.rows.select(self.row_of(chosen))
         self.panel.set_text("Presets" if saved.count() == 0 else f"Presets · {saved.count()}")
@@ -151,8 +151,8 @@ pub class PresetsPane:
         self.row_folders.append(key)
         items.append(ListItem(text = name, icon = IconKind.folder if key in self.closed else IconKind.folder_open))
 
-    ## A row: a start ("filter"), a film look ("color-correction") or a saved
-    ## preset ("color-swatch"), `depth` 1 inside a folder (its icon under the
+    ## A row: a start or a saved preset (a film strip), or a film look of a
+    ## motion picture (a movie camera); `depth` 1 inside a folder (its icon under the
     ## folder's name), 0 at the top.
     func add_row(self, items: list[ListItem], name: str, mark: str, symbol: str, depth: int) -> unit!:
         self.row_marks.append(mark)

@@ -2,8 +2,12 @@
 ## in Base, and the order and filter the grid shows them in, with one accessor per
 ## field for Luce. Marks written through `set_marks` change the catalog and the
 ## caller updates the index with `set_rating`, `set_flag` and `set_label`.
+import c
 import interop
 import memory
+import strings
+from luce_std import files
+import library
 from luce_prism import prism
 import catalog
 import store_rows
@@ -30,8 +34,13 @@ pub struct PhotoIndex:
         return (i64)self.order.length()
 
     ## How many photos the library holds.
+    ## How many photos the library holds, the Trash's left out.
     pub func total() -> i64:
-        return (i64)self.rows.photos.length()
+        var count: i64 = 0
+        for photo in self.rows.photos.view():
+            if photo.folder != catalog.trash_folder:
+                count += 1
+        return count
 
     func photo(at: i64) -> Photo:
         if at < 0 or at >= (i64)self.order.length():
@@ -187,10 +196,38 @@ pub struct PhotoIndex:
                 continue
             if not self.matches(&photo):
                 continue
+            # Every photo but the Trash's, or those of the folders shown.
+            if self.folders.length() == 0 and photo.folder == catalog.trash_folder:
+                continue
             if self.folders.length() > 0 and not self.in_folders(photo.folder):
                 continue
             try self.order.append((u32)at)
         try sort_by_capture(self.order.items(), self.rows.photos.view())
+
+    ## Delete every photo in the Trash of the library at `root` (catalog `store`):
+    ## its original, its cached pictures and its row, in one commit. How many.
+    ## Files already gone are passed over.
+    pub func empty_trash(store: interop.Reference[prism.Store], root: str) -> i64!:
+        let held = try store.get()
+        var batch = try catalog.Batch.begin(held)
+        defer batch.close()
+        var path: Buffer
+        defer path.destroy()
+        var count: i64 = 0
+        for photo in self.rows.photos.view():
+            if photo.folder != catalog.trash_folder:
+                continue
+            try library.join_into(root, photo.path, &path)
+            try remove_if_there(path.text())
+            for kind in ["thumbs", "previews", "developed"]:
+                try library.cache_path(root, kind, photo.id, &path)
+                try remove_if_there(path.text())
+            try library.stamp_path(root, photo.id, &path)
+            try remove_if_there(path.text())
+            try batch.remove(photo.id)
+            count += 1
+        try batch.commit()
+        return count
 
     pub func close():
         self.rows.close()
@@ -272,6 +309,12 @@ pub func set_marks(store: interop.Reference[prism.Store], ids: const i64[], name
     for id in ids:
         try batch.set_mark(id, name, value)
     try batch.commit()
+
+func remove_if_there(path: str) -> !:
+    let terminated = try strings.copy(path)
+    defer strings.release(terminated)
+    if files.exists((c.str)terminated):
+        try files.remove_file((c.str)terminated)
 
 ## Give photos `ids` the preset mark `mark` in the catalog, in one commit.
 pub func set_preset_marks(store: interop.Reference[prism.Store], ids: const i64[], mark: str) -> !:

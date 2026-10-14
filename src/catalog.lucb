@@ -19,6 +19,10 @@ from store_rows import wait_ms, text_of, integer_of, number_of
 import store_rows
 from luce_std.collections import Buffer, TextPool, List
 
+## The folder of a photo in the Trash: out of every view but the Trash's,
+## until it is put back or the Trash is emptied.
+pub let trash_folder: i64 = -1
+
 ## The identity every photo row lives in.
 pub let photos_identity: str = "photos"
 
@@ -57,7 +61,7 @@ pub struct Photo:
     ## What it was given last from the Presets pane (preset_marks.luc): "" none,
     ## "start/<mode>", "look/<look>" or "preset/<id>".
     pub var preset: str
-    ## The library folder it is in (folders.lucb's id), 0 none.
+    ## The library folder it is in (folders.lucb's id), 0 none, trash_folder in the Trash.
     pub var folder: i64
     pub var settings: str
 
@@ -162,6 +166,16 @@ pub struct Batch:
         if not try (try self.session_of()).contains(path):
             return
         try self.text(path, "preset", mark)
+        self.count += 1
+
+    ## Remove photo `id`'s row.
+    pub func remove(id: i64) -> !:
+        try photo_path(id, &self.path)
+        let path = self.path.text()
+        let session = try self.session_of()
+        if not try session.contains(path):
+            return
+        try session.remove(path)
         self.count += 1
 
     ## Store photo `id`'s develop settings (text form).

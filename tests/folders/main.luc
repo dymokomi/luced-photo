@@ -4,6 +4,7 @@
 ## folder hands its photos and folders to the folder it was in. Prints PASS or
 ## traps.
 from photo_library import PhotoLibrary
+from folder_tree import trash
 from luce_std import files, paths, clock
 
 
@@ -42,6 +43,23 @@ pub func main(arguments: list[str]) -> int!:
     let at = library.folders.position_of(lisbon)
     expect(library.folders.position_of(trips) < 0 and at >= 0 and library.folders.parent(at) == 0, "Lisbon went up when Trips was deleted")
     expect(library.count_in(lisbon) == 1 and library.count_in(0) == 2, "no photo was lost")
+    # The Trash: a photo moved in leaves All Photos; put back, it returns;
+    # emptied, its original and its cached pictures are gone.
+    library.show_folder(0)
+    let doomed = library.original_path(0)
+    let id = library.index.id(0)
+    library.trash_photos([0])
+    expect(library.count_in(0) == 1 and library.count_in(trash) == 1 and library.index.count() == 1, "a photo went to the Trash")
+    library.show_folder(trash)
+    expect(library.index.count() == 1 and library.index.id(0) == id, "the Trash shows it")
+    library.put_back([0])
+    expect(library.count_in(trash) == 0 and library.count_in(0) == 2, "put back")
+    library.show_folder(0)
+    library.trash_photos([library.index.position_of(id)])
+    expect(files.exists(doomed) and files.exists(library.thumb_path(id)), "its files are there before emptying")
+    expect(library.empty_trash() == 1, "the Trash emptied one photo")
+    expect(not files.exists(doomed) and not files.exists(library.thumb_path(id)), "its original and thumbnail are deleted")
+    expect(library.count_in(trash) == 0 and library.count_in(0) == 1 and library.index.position_of(id) < 0, "and its row")
     library.close()
-    print("PASS folders: nested, imported into, counted, moved, renamed and deleted")
+    print("PASS folders: nested, imported into, counted, moved, renamed, deleted, trashed, put back and emptied")
     return 0

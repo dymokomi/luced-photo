@@ -61,6 +61,19 @@ pub func main(arguments: list[str]) -> int!:
     for mode in 0..<modes.count:
         panels.set_mode(mode)
         photo.run(["luced-photo", "--smoke"])
+    # Each mode keeps its arrangement: a narrower Photos pane in Library, then
+    # Develop and back, comes back as it was; Reset Layout gives the usual one.
+    panels.set_mode(modes.library)
+    let usual = panels.dock.layout_text()
+    panels.dock.set_fraction(panels.library_pane.panel, 0.25)
+    let narrow = panels.dock.layout_text()
+    expect(narrow != usual, "the Photos pane narrowed")
+    panels.set_mode(modes.develop)
+    expect(panels.dock.layout_text() != narrow, "Develop has its own arrangement")
+    panels.set_mode(modes.library)
+    expect(panels.dock.layout_text() == narrow, "Library comes back as it was left")
+    panels.actions.reset_layout.trigger()
+    expect(panels.dock.layout_text() == usual, "Reset Layout gives the usual arrangement")
     photo.close()
-    print("PASS modes: each mode shows its stages; outputs and switches change them; every mode draws")
+    print("PASS modes: each mode shows its stages; outputs and switches change them; every mode draws; each keeps its arrangement")
     return 0

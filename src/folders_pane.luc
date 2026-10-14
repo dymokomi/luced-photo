@@ -4,12 +4,15 @@
 ## footer imports a folder or photos and makes a folder; a row's menu (right
 ## click) makes a folder at the top or inside it, renames or deletes it (its
 ## photos and folders go to the folder it was in), and moves the selected
-## photos into it. Below the folders, each camera plugged in has a row: an
-## import of its new photos once its session is open.
+## photos into it. The Trash, last, holds photos deleted from the Photos pane
+## until its menu empties it: the photos and their files deleted for good.
+## Below the folders, each camera plugged in has a row: an import of its new
+## photos once its session is open.
 from luce_ui.ui import Widget, Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ContextMenu, Command, TextPrompt, ConfirmDialog, Font, ScrollView
 from interop import Connection
 from photo_library import PhotoLibrary
 from folder_tree import FolderTree
+import folder_tree
 from luce_ptp.ptp import Watcher
 
 pub class FoldersPane:
@@ -25,12 +28,15 @@ pub class FoldersPane:
     let rename_command: Command
     let delete_command: Command
     let move_command: Command
+    let empty_command: Command
+    ## Asked before the Trash is emptied (`confirm` asks about a folder otherwise).
+    var emptying: bool = false
     var connections: list[Connection] = []
     ## The folder a menu or the prompt is about (-1 none), and what the prompt
     ## asks: "new" a folder's name (inside `target`, 0 at the top), "rename".
     var target: int = -1
     var asking: str = ""
-    ## A folder was picked (0: All Photos).
+    ## A folder was picked (0: All Photos, folder_tree.trash the Trash).
     pub var on_pick: func(int) -> unit!? = none
     ## Move the selected photos into a folder.
     pub var on_move_here: func(int) -> unit!? = none
@@ -57,6 +63,8 @@ pub class FoldersPane:
         self.rename_command = Command("Rename Folder…", id = "folder_rename")
         self.delete_command = Command("Delete Folder…", id = "folder_delete")
         self.move_command = Command("Move Selected Photos Here", id = "folder_move_here")
+        self.empty_command = Command("Empty Trash…", id = "folder_empty_trash")
+        self.connections.append(self.empty_command.on_trigger(self.ask_empty))
         self.connections.append(self.new_command.on_trigger(func () -> unit!:
             self.ask_new(0)))
         self.connections.append(self.inside_command.on_trigger(func () -> unit!:
@@ -65,9 +73,10 @@ pub class FoldersPane:
         self.connections.append(self.delete_command.on_trigger(self.ask_delete))
         self.connections.append(self.move_command.on_trigger(func () -> unit!:
             if let move = self.on_move_here:
-                move(self.target if self.target >= 0 else 0)))
+                move(self.target if self.target >= 0 or self.target == folder_tree.trash else 0)))
         self.menu = ContextMenu(ScrollView(self.tree), [self.new_command, self.inside_command, self.rename_command, Command("", divider = true),
-                                                        self.move_command, Command("", divider = true), self.delete_command], font = font)
+                                                        self.move_command, Command("", divider = true), self.delete_command,
+                                                        self.empty_command], font = font)
         self.connections.append(self.menu.on_open(self.fit_menu))
         self.prompt = TextPrompt(font = font)
         self.connections.append(self.prompt.on_submit(self.submitted))
@@ -118,7 +127,8 @@ pub class FoldersPane:
         let folder = self.target > 0
         for command in [self.inside_command, self.rename_command, self.delete_command]:
             command.set_enabled(folder)
-        self.move_command.set_enabled(self.target >= 0)
+        self.move_command.set_enabled(self.target != folder_tree.nowhere)
+        self.empty_command.set_enabled(self.target == folder_tree.trash and self.library.count_in(folder_tree.trash) > 0)
 
     ## Read the folders again (the counts too).
     pub func refresh(self) -> unit!:
@@ -158,7 +168,25 @@ pub class FoldersPane:
             return
         self.confirm.open(f"Delete the folder “{self.library.folders.name(at)}”? Its photos and folders go to the folder it is in; no photo is deleted.", "Delete", "")
 
+    ## Ask before the Trash's photos and their files are deleted for good.
+    func ask_empty(self) -> unit!:
+        let count = self.library.count_in(folder_tree.trash)
+        if count == 0:
+            return
+        self.emptying = true
+        self.confirm.open(f"Delete the {count} photo{"" if count == 1 else "s"} in the Trash for good? Their files are deleted from the library.", "Delete", "")
+
     func chosen_delete(self, role: int) -> unit!:
+        if self.emptying:
+            self.emptying = false
+            if role != 0:
+                return
+            let count = self.library.empty_trash()
+            self.tree.refresh()
+            if let pick = self.on_pick:
+                pick(self.tree.picked)
+            self.tell(f"Deleted {count} photo{"" if count == 1 else "s"} for good.")
+            return
         if role != 0 or self.target <= 0:
             return
         let picked = self.tree.picked

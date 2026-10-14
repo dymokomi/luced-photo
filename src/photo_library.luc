@@ -12,6 +12,7 @@ from importer import Importer
 import importer
 from presets import PresetList
 import presets
+import catalog
 from folders import FolderList
 from luce_ptp.ptp import Watcher
 import folders
@@ -111,7 +112,7 @@ pub class PhotoLibrary:
             if not current.finished():
                 error(busy, "an import is already running")
             current.close()
-        self.running = importer.start(self.store, self.root, sources, self.folder, self.import_notifier)
+        self.running = importer.start(self.store, self.root, sources, self.import_folder(), self.import_notifier)
 
     ## Import the photos on camera `at` of `cameras` that the library lacks, as
     ## start_import imports files.
@@ -120,7 +121,11 @@ pub class PhotoLibrary:
             if not current.finished():
                 error(busy, "an import is already running")
             current.close()
-        self.running = importer.start_camera(self.store, self.root, cameras, at, self.folder, self.import_notifier)
+        self.running = importer.start_camera(self.store, self.root, cameras, at, self.import_folder(), self.import_notifier)
+
+    ## The folder an import goes into: the one shown, never the Trash.
+    func import_folder(self) -> int:
+        return self.folder if self.folder > 0 else 0
 
     ## Whether an import is running.
     pub func importing(self) -> bool:
@@ -249,7 +254,7 @@ pub class PhotoLibrary:
     ## Show folder `id`'s photos, its subfolders' with them (0: every photo).
     pub func show_folder(self, id: int) -> unit!:
         self.folder = id
-        self.shown_folders = self.tree_of(id) if id > 0 else []
+        self.shown_folders = self.tree_of(id) if id > 0 else ([catalog.trash_folder] if id == catalog.trash_folder else [])
         self.index.filter(self.minimum_rating, self.flags, self.label, self.search, self.searched_presets(), self.shown_folders)
 
     ## Folder `id` and every folder inside it.
@@ -263,6 +268,8 @@ pub class PhotoLibrary:
 
     ## How many photos folder `id` holds, its subfolders' with them (0: the library).
     pub func count_in(self, id: int) -> int:
+        if id == catalog.trash_folder:
+            return self.index.count_in([catalog.trash_folder])
         if id <= 0:
             return self.index.total()
         return self.index.count_in(self.tree_of(id))
@@ -311,6 +318,21 @@ pub class PhotoLibrary:
         self.set_marks(positions, "folder", id)
         # Out of the folder shown: they leave the view.
         self.show_folder(self.folder)
+
+    # mark: the trash =========================================================================
+
+    ## Put the photos at `positions` of the index in the Trash, or back out of
+    ## it (into no folder); they leave the view.
+    pub func trash_photos(self, positions: list[int]) -> unit!:
+        self.move_photos(positions, catalog.trash_folder)
+    pub func put_back(self, positions: list[int]) -> unit!:
+        self.move_photos(positions, 0)
+
+    ## Delete every photo in the Trash, its files with it; how many.
+    pub func empty_trash(self) -> int!:
+        let count = self.index.empty_trash(self.store, self.root)
+        self.reload()
+        return count
 
     pub func close(self):
         if let current = self.running:

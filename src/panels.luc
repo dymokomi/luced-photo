@@ -18,6 +18,7 @@ from presets_pane import PresetsPane
 from folders_pane import FoldersPane
 from modes import ModeBar
 import modes
+import folder_tree
 import theme
 from rerender import Rerenderer
 from develop_session import DevelopSession
@@ -53,6 +54,9 @@ pub class Panels:
     ## The mode shown (modes.luc).
     pub var mode: int = -1
     var mode_before: int = -1
+    ## Each mode's arrangement of panels (DStack.layout_text), kept when the
+    ## mode is left and between runs (remembered.luc); "" for its usual one.
+    var layouts: list[str] = []
     let status: Text
     ## What runs in the background, at the status line's right ("Developing 3 photos…").
     let activity: Text
@@ -87,7 +91,8 @@ pub class Panels:
         let shared = self.actions
         self.library_pane = LibraryPane(self.library, font, [shared.import_folder, shared.import_photos],
                                         [shared.copy_film, shared.paste_film, Command("", divider = true), shared.copy_settings, shared.paste_settings,
-                                         shared.sync_settings, Command("", divider = true), shared.reset_settings])
+                                         shared.sync_settings, Command("", divider = true), shared.reset_settings, Command("", divider = true),
+                                         shared.move_to_trash, shared.put_back])
         self.folders = FoldersPane(self.library, font, [self.actions.import_folder, self.actions.import_photos])
         self.folders.on_status = self.tell
         self.folders.on_camera_import = self.import_camera
@@ -155,7 +160,7 @@ pub class Panels:
         let toolbar = HStack([Spacer(), self.mode_bar, Spacer(),
                               Menu("Library", [actions.new_library, actions.open_library, Command("", divider = true), actions.import_photos, actions.import_folder, actions.export_photos, actions.select_all, actions.bigger, actions.smaller], font = font),
                               Menu("Filter", self.library_pane.filters, font = font),
-                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.before_after, actions.watch_development, actions.refine_grain], font = font),
+                              Menu("Photo", actions.ratings + [actions.pick, actions.reject, actions.unflag] + actions.labels + [actions.previous, actions.next, actions.zoom, actions.before_after, actions.move_to_trash, actions.put_back, actions.watch_development, actions.refine_grain], font = font),
                               Menu("Edit", [actions.undo, actions.redo, actions.copy_settings, actions.paste_settings, actions.copy_film, actions.paste_film,
                                                     actions.sync_settings, actions.reset_settings], font = font),
                               Menu("Window", actions.modes + [Command("", divider = true), actions.palette, actions.reset_layout], font = font)], spacing = 4.0, padding = 4.0)
@@ -167,6 +172,8 @@ pub class Panels:
         self.body = VStack([toolbar, self.dock, footer, self.export_dialog.dialog, self.palette], spacing = 0.0)
         self.body.layout().set_flex()
         self.actions.refresh(false)
+        for mode in 0..<modes.count:
+            self.layouts.append(remembered.layout(mode))
         self.arrange(modes.library)
         self.greet()
 
@@ -209,6 +216,15 @@ pub class Panels:
         self.connections.append(actions.undo.on_trigger(self.session.undo))
         self.connections.append(actions.redo.on_trigger(self.session.redo))
         self.connections.append(actions.copy_settings.on_trigger(self.session.copy))
+        for command in [actions.move_to_trash, actions.move_to_trash_forward]:
+            self.connections.append(command.on_trigger(func () -> unit!:
+                self.trash_selection()))
+        self.connections.append(actions.put_back.on_trigger(func () -> unit!:
+            let picked = self.library_pane.selection()
+            if self.library.folder != folder_tree.trash or picked.length == 0:
+                self.tell("Put Back takes photos out of the Trash: show the Trash and select them.")
+                return
+            self.move_photos(0, picked)))
         self.connections.append(actions.copy_film.on_trigger(func () -> unit!:
             self.session.copy_film(self.library_pane.lead())))
         self.connections.append(actions.paste_film.on_trigger(func () -> unit!:
@@ -245,13 +261,20 @@ pub class Panels:
                 self.set_mode(mode)))
         # The current mode's panes back where they start.
         self.connections.append(actions.reset_layout.on_trigger(func () -> unit!:
-            self.dock.set_fraction(self.viewer.panel, 0.74)
-            self.arrange(self.mode)))
+            self.layouts[self.mode] = ""
+            self.arrange(self.mode, keep = false)))
         self.connections.append(actions.palette.on_trigger(func () -> unit!:
             self.palette.open()))
         self.connections.append(actions.quit.on_trigger(func () -> unit!:
             if let app = self.app:
                 app.stop()))
+
+    ## Put the selected photos in the Trash (in the Trash already: nothing).
+    func trash_selection(self) -> unit!:
+        if self.library.folder == folder_tree.trash:
+            self.tell("These photos are in the Trash: right-click the Trash to empty it, or Put Back.")
+            return
+        self.move_photos(folder_tree.trash, self.library_pane.selection())
 
     ## Move the photos at `picked` (Photos pane positions) into folder `id` (0: none).
     func move_photos(self, id: int, picked: list[int]) -> unit!:
@@ -266,7 +289,7 @@ pub class Panels:
         self.library_pane.select(-1)
         self.show_selection(-1)
         let at = self.library.folders.position_of(id)
-        let name = f"“{self.library.folders.name(at)}”" if at >= 0 else "no folder"
+        let name = f"“{self.library.folders.name(at)}”" if at >= 0 else ("the Trash" if id == folder_tree.trash else "no folder")
         self.tell(f"Moved {picked.length} photo{"" if picked.length == 1 else "s"} to {name}.")
 
     # mark: modes ===============================================================================
@@ -281,16 +304,47 @@ pub class Panels:
     ## Lay the panes out for `mode`: Library with the grid at the left and
     ## Presets over Properties at the right; the others with the photos as a
     ## filmstrip along the bottom and the mode's controls in Properties.
-    func arrange(self, mode: int) -> unit!:
+    ## The mode left keeps its arrangement (unless `keep` is false); mode
+    ## `mode` gets back the one it had, else its usual one.
+    func arrange(self, mode: int, keep: bool = true) -> unit!:
+        if keep and self.mode_before >= 0:
+            self.layouts[self.mode_before] = self.dock.layout_text()
         self.mode = mode
         self.mode_bar.choose(mode)
-        for panel in [self.library_pane.panel, self.presets.panel, self.folders.panel]:
-            if self.dock.contains(panel):
-                self.dock.remove(panel)
         let was_strip = self.mode_before >= 0 and self.mode_before != modes.library
         if (mode != modes.library) != was_strip or self.mode_before < 0:
             self.library_pane.set_strip(mode != modes.library)
         self.mode_before = mode
+        if not self.restore_layout(mode):
+            self.usual_layout(mode)
+        self.properties.set_mode(mode)
+        # The Library mode shows developed pictures; the others develop live.
+        self.viewer.set_live(mode != modes.library)
+        for (at, command) in self.actions.modes.indexed():
+            command.set_checked(at == mode)
+        if let app = self.app:
+            app.set_theme(theme.editor_theme(modes.color(mode)))
+
+    ## Mode `mode`'s arrangement as it was left; whether there was one that held.
+    func restore_layout(self, mode: int) -> bool!:
+        let text = self.layouts[mode]
+        if text == "":
+            return false
+        let panels = [self.viewer.panel, self.properties.panel, self.library_pane.panel, self.presets.panel, self.folders.panel]
+        self.dock.restore_layout(text, panels) catch failure:
+            self.layouts[mode] = ""
+            return false
+        return true
+
+    ## Mode `mode`'s usual arrangement: the viewer with Properties at its right;
+    ## in Library the folders, the photos at its left and Presets over
+    ## Properties, else the photos as a filmstrip under the viewer.
+    func usual_layout(self, mode: int) -> unit!:
+        for panel in [self.library_pane.panel, self.presets.panel, self.folders.panel, self.properties.panel]:
+            if self.dock.contains(panel):
+                self.dock.remove(panel)
+        self.dock.add(self.properties.panel, self.viewer.panel, DockPosition.right)
+        self.dock.set_fraction(self.viewer.panel, 0.74)
         if mode == modes.library:
             self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.left)
             self.dock.set_fraction(self.library_pane.panel, 0.4)
@@ -301,13 +355,6 @@ pub class Panels:
         else:
             self.dock.add(self.library_pane.panel, self.viewer.panel, DockPosition.bottom)
             self.dock.set_fraction(self.viewer.panel, 0.84)
-        self.properties.set_mode(mode)
-        # The Library mode shows developed pictures; the others develop live.
-        self.viewer.set_live(mode != modes.library)
-        for (at, command) in self.actions.modes.indexed():
-            command.set_checked(at == mode)
-        if let app = self.app:
-            app.set_theme(theme.editor_theme(modes.color(mode)))
 
     # mark: libraries ===========================================================================
 
@@ -613,6 +660,12 @@ pub class Panels:
 
     pub func close(self):
         self.session.flush() catch failure:
+            _ = failure
+        # Each mode's arrangement for the next run.
+        if self.mode_before >= 0:
+            self.layouts[self.mode] = self.dock.layout_text() catch failure:
+                recover ""
+        remembered.remember_layouts(self.layouts) catch failure:
             _ = failure
         # Before the import stops: a camera's transaction waits for this thread,
         # and closing the watcher lets it go.

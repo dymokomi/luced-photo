@@ -1,10 +1,11 @@
 ## The Library pane's tree: All Photos, then the library's folders, each under
-## the folder it is in, with how many photos it holds (its subfolders' with
-## them). A folder with folders inside has a disclosure triangle; a click on it
+## the folder it is in, then the Trash, each with how many photos it holds (a
+## folder's subfolders' with it). A folder with folders inside has a disclosure triangle; a click on it
 ## opens or closes the folder, a click on the row shows its photos, a double
 ## click renames it, a right click asks for its menu. Photos dragged from the
 ## Photos pane drop onto a folder to move there (onto All Photos: out of any
-## folder); the row under them is outlined, the folder shown refuses them.
+## folder; onto the Trash: into it); the row under them is outlined, the
+## folder shown refuses them.
 from luce_ui.ui import Widget, Layout, Constraints, Size, Event, Painter, Font
 from luce_gpu.gpu import RenderTarget, Rect
 from luce_window.input import EventKind
@@ -13,11 +14,16 @@ from photo_library import PhotoLibrary
 import theme
 import modes
 
+## The Trash's row (its photos' folder: catalog.trash_folder), and a right
+## click below every row.
+pub let trash: int = -1
+pub let nowhere: int = -2
+
 let row_height: float = 24.0
 let indent: float = 14.0
 
-## A row as drawn: the folder's id (0: All Photos), its depth, whether it has
-## folders inside.
+## A row as drawn: the folder's id (0: All Photos, `trash` the Trash), its
+## depth, whether it has folders inside.
 struct Row:
     var id: int
     var depth: int
@@ -38,7 +44,7 @@ pub class FolderTree: Widget:
     pub var picked: int = 0
     pub var on_pick: func(int) -> unit!? = none
     pub var on_rename: func(int) -> unit!? = none
-    ## A right click on a row (its folder) or below them (-1).
+    ## A right click on a row (its folder) or below them (`nowhere`).
     pub var on_menu: func(int) -> unit!? = none
     ## Photos dropped on a folder: the folder (0: none) and the photos'
     ## positions in the Photos pane.
@@ -64,7 +70,8 @@ pub class FolderTree: Widget:
     pub func refresh(self) -> unit!:
         self.rows = [Row(id = 0, depth = 0, parent = false)]
         self.add_children(0, 0)
-        if self.library.folders.position_of(self.picked) < 0:
+        self.rows.append(Row(id = trash, depth = 0, parent = false))
+        if self.picked > 0 and self.library.folders.position_of(self.picked) < 0:
             self.picked = 0
         self.box.set_limits(Size(120.0, float(self.rows.length) * row_height + 8.0), Size(16384.0, 16384.0))
         self.box.invalidate()
@@ -120,7 +127,7 @@ pub class FolderTree: Widget:
             let ink = theme.grey(16.0) if row.id == self.picked else theme.text()
             if row.parent:
                 p.text("▾" if row.id in self.open else "▸", x, y + 3.0, ink, self.font)
-            let name = "All Photos" if row.id == 0 else folders.name(folders.position_of(row.id))
+            let name = "All Photos" if row.id == 0 else ("Trash" if row.id == trash else folders.name(folders.position_of(row.id)))
             p.text(name, x + indent, y + 3.0, ink, self.font)
             let count = f"{self.library.count_in(row.id)}"
             p.text(count, size.width - 10.0 - self.font.measure(count), y + 3.0, theme.grey(40.0) if row.id == self.picked else theme.text_muted(), self.font)
@@ -169,7 +176,7 @@ pub class FolderTree: Widget:
             let at = self.row_at(event.y)
             if event.button == 1:
                 if let menu = self.on_menu:
-                    menu(self.rows[at].id if at >= 0 else -1)
+                    menu(self.rows[at].id if at >= 0 else nowhere)
                 return
             if at < 0:
                 return

@@ -35,6 +35,10 @@ pub class Actions:
     pub let copy_settings: Command
     pub let paste_settings: Command
     pub let copy_film: Command
+    pub let move_to_trash: Command
+    ## Forward Delete does what ⌫ does (a command has one key; this one is in no menu).
+    pub let move_to_trash_forward: Command
+    pub let put_back: Command
     pub let paste_film: Command
     pub let sync_settings: Command
     pub let reset_settings: Command
@@ -80,6 +84,9 @@ pub class Actions:
         self.redo = Command("Redo", Shortcut(Key.z, primary = true, shift = true), id = "redo")
         self.copy_settings = Command("Copy Settings", Shortcut(Key.c, primary = true, shift = true), id = "copy_settings")
         self.paste_settings = Command("Paste Settings", Shortcut(Key.v, primary = true, shift = true), id = "paste_settings")
+        self.move_to_trash = Command("Move to Trash", Shortcut(Key.backspace), id = "move_to_trash")
+        self.move_to_trash_forward = Command("Move to Trash", Shortcut(Key.delete), id = "move_to_trash_forward")
+        self.put_back = Command("Put Back", id = "put_back")
         self.copy_film = Command("Copy Film Preset", Shortcut(Key.c, primary = true, alt = true), id = "copy_film")
         self.paste_film = Command("Paste Film Preset", Shortcut(Key.v, primary = true, alt = true), id = "paste_film")
         self.sync_settings = Command("Sync Settings to Selection", Shortcut(Key.s, primary = true, shift = true), id = "sync_settings")
@@ -94,7 +101,7 @@ pub class Actions:
         self.all = [self.new_library, self.open_library, self.import_photos, self.import_folder, self.export_photos, self.select_all, self.bigger, self.smaller] + self.ratings
         self.all = self.all + [self.pick, self.reject, self.unflag] + self.labels
         self.all = self.all + [self.next, self.previous, self.zoom, self.before_after, self.watch_development, self.refine_grain, self.undo, self.redo, self.copy_settings, self.paste_settings,
-                               self.copy_film, self.paste_film, self.sync_settings, self.reset_settings] + self.modes + [self.palette, self.reset_layout, self.quit]
+                               self.copy_film, self.paste_film, self.move_to_trash, self.move_to_trash_forward, self.put_back, self.sync_settings, self.reset_settings] + self.modes + [self.palette, self.reset_layout, self.quit]
 
     ## Enable the actions on photos when some are selected.
     pub func refresh(self, has_photo: bool) -> unit!:
