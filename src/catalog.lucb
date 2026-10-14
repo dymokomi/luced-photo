@@ -54,8 +54,9 @@ pub struct Photo:
     pub var rating: i64
     pub var flag: i64
     pub var label: i64
-    ## The preset given it last (presets.lucb's id), 0 none.
-    pub var preset: i64
+    ## What it was given last from the Presets pane (preset_marks.luc): "" none,
+    ## "start/<mode>", "look/<look>" or "preset/<id>".
+    pub var preset: str
     ## The library folder it is in (folders.lucb's id), 0 none.
     pub var folder: i64
     pub var settings: str
@@ -139,12 +140,12 @@ pub struct Batch:
         try self.integer(path, "rating", photo.rating)
         try self.integer(path, "flag", photo.flag)
         try self.integer(path, "label", photo.label)
-        try self.integer(path, "preset", photo.preset)
+        try self.text(path, "preset", photo.preset)
         try self.integer(path, "folder", photo.folder)
         try self.text(path, "settings", photo.settings)
         self.count += 1
 
-    ## Set one integer field (`rating`, `flag`, `label`, `preset` or `folder`) of photo `id`; a photo
+    ## Set one integer field (`rating`, `flag`, `label` or `folder`) of photo `id`; a photo
     ## no longer in the catalog is passed over.
     pub func set_mark(id: i64, name: str, value: i64) -> !:
         try photo_path(id, &self.path)
@@ -152,6 +153,15 @@ pub struct Batch:
         if not try (try self.session_of()).contains(path):
             return
         try self.integer(path, name, value)
+        self.count += 1
+
+    ## Set photo `id`'s preset mark; a photo no longer in the catalog is passed over.
+    pub func set_preset(id: i64, mark: str) -> !:
+        try photo_path(id, &self.path)
+        let path = self.path.text()
+        if not try (try self.session_of()).contains(path):
+            return
+        try self.text(path, "preset", mark)
         self.count += 1
 
     ## Store photo `id`'s develop settings (text form).
@@ -235,7 +245,7 @@ func collect(context: void*?, view: const prism.RowView*) -> !:
         aperture = try number_of(view, "aperture"), exposure = try number_of(view, "exposure"),
         shutter = try kept(into, view, "shutter"), iso = try integer_of(view, "iso"),
         bias = try number_of(view, "bias"), rating = try integer_of(view, "rating"),
-        flag = try integer_of(view, "flag"), label = try integer_of(view, "label"), preset = try integer_of(view, "preset"), folder = try integer_of(view, "folder"),
+        flag = try integer_of(view, "flag"), label = try integer_of(view, "label"), preset = try kept(into, view, "preset"), folder = try integer_of(view, "folder"),
         settings = try kept(into, view, "settings")))
 
 ## Every photo in the catalog, in the order they were added.

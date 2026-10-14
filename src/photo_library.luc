@@ -170,7 +170,7 @@ pub class PhotoLibrary:
 
     # mark: marks ===============================================================================
 
-    ## Set `name` ("rating", "flag", "label" or "preset", a preset's id or 0)
+    ## Set `name` ("rating", "flag", "label" or "folder")
     ## to `value` on the photos at `positions` of the index, in the catalog and
     ## in the index.
     pub func set_marks(self, positions: list[int], name: str, value: int) -> unit!:
@@ -184,12 +184,19 @@ pub class PhotoLibrary:
                     self.index.set_rating(at, value)
                 "flag":
                     self.index.set_flag(at, value)
-                "preset":
-                    self.index.set_preset(at, value)
                 "folder":
                     self.index.set_folder(at, value)
                 _:
                     self.index.set_label(at, value)
+
+    ## Give the photos at `positions` the preset mark `mark` (preset_marks.luc).
+    pub func set_preset_mark(self, positions: list[int], mark: str) -> unit!:
+        var ids: list[int] = []
+        for at in positions:
+            ids.append(self.index.id(at))
+        photo_index.set_preset_marks(self.store, ids, mark)
+        for at in positions:
+            self.index.set_preset(at, mark)
 
     ## Store photo `id`'s develop settings (text form) in the catalog and the index.
     pub func save_settings(self, id: int, text: str) -> unit!:
@@ -202,8 +209,8 @@ pub class PhotoLibrary:
 
     ## Keep settings `text` as the preset `name` (replacing one of that name),
     ## showing `exposed` ("|" between) in the Library mode; its id.
-    pub func save_preset(self, name: str, text: str, exposed: str) -> int!:
-        let id = presets.save_preset(self.store, self.presets, name, text, exposed)
+    pub func save_preset(self, name: str, text: str, exposed: str, folder: int = 0) -> int!:
+        let id = presets.save_preset(self.store, self.presets, name, text, exposed, folder)
         self.presets = presets.read_presets(self.store)
         return id
 
@@ -217,6 +224,24 @@ pub class PhotoLibrary:
 
     pub func delete_preset(self, id: int) -> unit!:
         presets.delete_preset(self.store, id)
+        self.presets = presets.read_presets(self.store)
+
+    ## Put preset `id` into preset folder `folder` (0: none).
+    pub func move_preset(self, id: int, folder: int) -> unit!:
+        presets.move_preset(self.store, id, folder)
+        self.presets = presets.read_presets(self.store)
+
+    ## A new preset folder named `name`; its id. Renaming and deleting one (its
+    ## presets left in no folder).
+    pub func make_preset_folder(self, name: str) -> int!:
+        let id = presets.make_folder(self.store, self.presets, name)
+        self.presets = presets.read_presets(self.store)
+        return id
+    pub func rename_preset_folder(self, id: int, name: str) -> unit!:
+        presets.rename_folder(self.store, id, name)
+        self.presets = presets.read_presets(self.store)
+    pub func delete_preset_folder(self, id: int) -> unit!:
+        presets.delete_folder(self.store, self.presets, id)
         self.presets = presets.read_presets(self.store)
 
     # mark: folders =============================================================================

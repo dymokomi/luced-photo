@@ -124,6 +124,16 @@ class Section:
 ## The Output section's stage number: none of the recipe's.
 let output_section: int = -2
 
+## Parameter `name`'s menu items ("name=value|…") from its choices in
+## luce-develop (the names the settings store), from choice `first` to before
+## `end` (-1: all).
+func choice_items(name: str, first: int = 0, end: int = -1) -> str:
+    var items: list[str] = []
+    let last = settings.choice_total(name) if end < 0 else end
+    for at in first..<last:
+        items.append(f"{settings.choice_name(name, at)}={at}")
+    return items.join("|")
+
 ## The stages a switch takes in and out of the recipe.
 func optional(stage: int) -> bool:
     return stage >= 0 and recipe.stage_optional(stage)
@@ -230,63 +240,58 @@ pub class DevelopControls:
             specs.append(ParameterSpec(name = "aspect", label = "Aspect", kind = ParameterKind.menu, resettable = false,
                                        items = "Free=0|Original=-1|1:1=1|4:5=0.8|5:4=1.25|3:2=1.5|2:3=0.6667|16:9=1.7778"))
         if title == "Film":
-            var stocks: list[str] = []
-            for at in 0..<film.stock_count():
-                stocks.append(f"{film.stock_name(at)}={at + 1}")
-            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = stocks.join("|"), value = 3.0))
+            # Every stock; no film is not a choice here.
+            specs.insert(1, ParameterSpec(name = "film_stock", label = "Stock", kind = ParameterKind.menu, items = choice_items("film_stock", 1), value = 3.0))
             specs.insert(2, ParameterSpec(name = "film_format", label = "Format", kind = ParameterKind.menu,
-                                          items = "35 mm Academy=0|Super 35=1|16 mm=2|Super 16=4|65 mm 5-perf=3|IMAX 15/70=5"))
+                                          items = choice_items("film_format")))
             specs.append(ParameterSpec(name = "film_backing", label = "Backing", kind = ParameterKind.menu,
-                                       items = "As made=0|Removed (as CineStill)=1",
+                                       items = choice_items("film_backing"),
                                        doc = "The antihalation backing: removed, light reflected off the base comes back as red halos"))
         if title == "Print":
             specs.insert(1, ParameterSpec(name = "print_material", label = "Print Film", kind = ParameterKind.menu,
-                                          items = "Kodak Vision 2383=0|Technicolor dye transfer=1"))
+                                          items = choice_items("print_material")))
             specs.append(ParameterSpec(name = "print_optical", label = "Optical Step", kind = ParameterKind.toggle,
                                        doc = "An optical printer between negative and print: Super 35's squeeze, a 70 mm blow-up"))
         if title == "Paper":
-            var papers: list[str] = []
-            for at in 0..<film.paper_total():
-                papers.append(f"{film.paper_name(at)}={at}")
-            specs.insert(1, ParameterSpec(name = "paper_stock", label = "Paper", kind = ParameterKind.menu, items = papers.join("|")))
+            specs.insert(1, ParameterSpec(name = "paper_stock", label = "Paper", kind = ParameterKind.menu, items = choice_items("paper_stock")))
             specs.insert(2, ParameterSpec(name = "paper_enlarger", label = "Enlarger", kind = ParameterKind.menu,
-                                          items = "Diffusion=0|Condenser=1|Contact print=2",
+                                          items = choice_items("paper_enlarger"),
                                           doc = "A condenser prints a silver negative harder (the Callier effect); a contact print has no enlarger flare"))
             specs.insert(3, ParameterSpec(name = "paper_surface", label = "Surface", kind = ParameterKind.menu,
-                                          items = "Glossy=0|Lustre=1|Matte=2",
+                                          items = choice_items("paper_surface"),
                                           doc = "A matte surface reflects some light before the image: its blacks are lighter (Kodak: D-max 1.7 against glossy's 2.1)"))
         if title == "Lens":
             specs.insert(1, ParameterSpec(name = "lens_coating", label = "Coating", kind = ParameterKind.menu,
-                                          items = "Multi-coated=0|Single-coated=1|Uncoated=2",
+                                          items = choice_items("lens_coating"),
                                           doc = "Veiling glare beyond a modern lens's: older coatings scatter more light over the frame"))
             specs.insert(2, ParameterSpec(name = "lens_diffusion", label = "Diffusion", kind = ParameterKind.menu,
-                                          items = "None=0|Low Contrast ½=1|Low Contrast 1=2|Low Contrast 2=3|Low Contrast 3=4|Low Contrast 4=5|Low Contrast 5=6",
+                                          items = choice_items("lens_diffusion"),
                                           doc = "A Tiffen Low Contrast filter: light from the frame laid over the shadows"))
         if title == "Scan":
             specs.insert(1, ParameterSpec(name = "scan_calibration", label = "Calibration", kind = ParameterKind.menu,
-                                          items = "Reference (Vision3 250D)=0|Matched to the stock=1",
+                                          items = choice_items("scan_calibration"),
                                           doc = "Reference: the scanner set up once, each stock showing its own color. Matched: fitted to this stock, colors returned to themselves"))
             specs.insert(2, ParameterSpec(name = "scan_resolution", label = "Resolution", kind = ParameterKind.menu,
-                                          items = "HD telecine (1920)=0|SD telecine (720)=1|2K scan=2|4K scan=3|6K scan=4",
+                                          items = choice_items("scan_resolution"),
                                           doc = "How finely the scanner samples the film: grain and detail are what it resolves, however far the viewer zooms"))
         if title == "Develop":
             # Its items follow the stock (show_values): its standard process,
             # then the others of its family.
             specs.insert(1, ParameterSpec(name = "develop_process", label = "Process", kind = ParameterKind.menu, items = "Standard=0"))
             specs.append(ParameterSpec(name = "develop_agitation", label = "Agitation", kind = ParameterKind.menu,
-                                       items = "As the process=0|Continuous=1|Intermittent=2|Stand=3",
+                                       items = choice_items("develop_agitation"),
                                        doc = "How often fresh developer reaches the film: less agitation, stronger edge effects"))
         if title == "Filter":
             # Matched balances the light to the stock as a white balance does;
             # with None or 85, White Balance is the light on set and the film sees it.
             specs.insert(1, ParameterSpec(name = "film_filter", label = "Balance", kind = ParameterKind.menu,
-                                          items = "Matched=0|None=1|85 (daylight)=2|81A=3|81EF=4|½ Coral=5",
+                                          items = choice_items("film_filter"),
                                           doc = "Matched: balanced to the stock. None or 85: White Balance is the light on set, as the film saw it"))
             specs.insert(2, ParameterSpec(name = "film_color_filter", label = "Color Filter", kind = ParameterKind.menu,
-                                          items = "None=0|Yellow (8)=1|Orange (21)=2|Red (25)=3|Green (11)=4|Blue (47)=5|Chocolate 1=6|Chocolate 2=7|Chocolate 3=8",
+                                          items = choice_items("film_color_filter"),
                                           doc = "A color filter on the lens, as for black-and-white film; exposure opens up by its factor"))
         if title == "View":
-            specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = "ACES 2.0=0|Standard=1|Linear=2"))
+            specs.append(ParameterSpec(name = "view", label = "Transform", kind = ParameterKind.menu, items = choice_items("view", 0, 3)))
         specs.append(ParameterSpec(name = "reset", label = "Reset", kind = ParameterKind.button, doc = f"Put {title} back as it was"))
         # The switch first, under the heading.
         if optional(recipe.owner_of(title)):

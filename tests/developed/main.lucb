@@ -61,7 +61,7 @@ pub func main(arguments: str[]) -> i32!:
     try library.ensure(folder.value)
     if not try developed(folder.value, ""):
         return 1
-    if not try developed(folder.value, "exposure=0.5;film_stock=12"):
+    if not try developed(folder.value, "exposure=0.5;film_stock=Kodak Portra 400"):
         return 1
     print("PASS developed: the picture and thumbnail written, the stamp the settings each time")
     return 0

@@ -38,6 +38,8 @@ pub func main(arguments: list[str]) -> int!:
     let film_copying = arguments.length > 5 and arguments[5] == "film"
     # Film look 0 given to the photo, then Before / After on.
     let comparing = arguments.length > 5 and arguments[5] == "compare"
+    # Mode N (modes.luc) after the photo is shown: "mode" then N.
+    let moding = arguments.length > 6 and arguments[5] == "mode"
     var ticks = 0
     var capture = -1
     let timer = photo.app.every(0.05, func () -> unit!:
@@ -63,7 +65,7 @@ pub func main(arguments: list[str]) -> int!:
             panels.show_selection(position + 1)
         if ticks == 40 and presetting:
             let presets = photo.panels.library.presets
-            photo.panels.presets.apply(presets.position_of_name("Preview Look"))
+            photo.panels.presets.apply_mark(preset_marks.for_saved(presets.id(presets.position_of_name("Preview Look"))))
         if ticks == 30 and wheeling:
             let box = photo.panels.viewer.layout().bounds()
             let x = box.x + box.width * 0.5
@@ -81,11 +83,11 @@ pub func main(arguments: list[str]) -> int!:
             photo.app.dispatch(Event(kind = EventKind.pointer_down, button = 0, x = x, y = y))
             photo.app.dispatch(Event(kind = EventKind.pointer_up, button = 0, x = x, y = y))
         if ticks == 30 and looking:
-            photo.panels.presets.apply(photo.panels.presets.row_of(preset_marks.for_look(look_at)))
+            photo.panels.presets.apply_mark(preset_marks.for_look(look_at))
         if looking and ticks == 30 + look_after and capture < 0:
             capture = 0
         if ticks == 30 and film_copying:
-            photo.panels.presets.apply(photo.panels.presets.row_of(preset_marks.for_look(0)))
+            photo.panels.presets.apply_mark(preset_marks.for_look(0))
         if ticks == 34 and film_copying:
             photo.panels.actions.copy_film.trigger()
             grid.select(0)
@@ -104,8 +106,10 @@ pub func main(arguments: list[str]) -> int!:
         if film_copying and ticks == 64 and capture < 0:
             capture = 0
         if ticks == 30 and comparing:
-            photo.panels.presets.apply(photo.panels.presets.row_of(preset_marks.for_look(0)))
+            photo.panels.presets.apply_mark(preset_marks.for_look(0))
             photo.panels.actions.before_after.trigger()
+        if ticks == 30 and moding:
+            photo.panels.set_mode(int(arguments[6]))
         if ticks == 30 and switching:
             photo.panels.open_library(arguments[6])
         if ticks == 40 and undoing:

@@ -13,6 +13,9 @@ from viewer import Viewer
 from library_pane import LibraryPane
 from rerender import Rerenderer
 from luce_develop import settings
+from luce_develop import looks
+from luce_develop import recipe
+import preset_marks
 from luce_ui.ui import Application
 
 ## Seconds an edit waits for more before it is saved as one step.
@@ -64,7 +67,7 @@ func film_part(text: str) -> str!:
     for at in 0..<settings.parameter_total():
         if not (settings.section_of(at) in own):
             let name = settings.name_of(at)
-            parts.append(f"{name}={look.get(name)}")
+            parts.append(settings.part_text(name, look.get(name)))
     var shaped: set[str] = {}
     for part in parts_of(text, false):
         if part.starts_with("curve_"):
@@ -75,6 +78,22 @@ func film_part(text: str) -> str!:
             parts.append(f"{name}=0,0 1,1")
     parts.append(look.recipe_text())
     return parts.join(";")
+
+## The film look (else the start) settings `text` carry whole: giving it to
+## them would change nothing. "" when none.
+func carried_mark(text: str) -> str!:
+    let own = settings.look(text).text()
+    for at in 0..<looks.count():
+        if stacked(looks.text(at), text) == own:
+            return preset_marks.for_look(at)
+    # An untouched photo is Television's already: a start counts only where the
+    # photo names a stock or a recipe of its own.
+    if not (text.contains("film_stock=") or text.contains("recipe=")):
+        return ""
+    for at in 0..<recipe.mode_total():
+        if stacked(settings.mode_text(at), text) == own:
+            return preset_marks.for_start(at)
+    return ""
 
 ## Preset `preset` stacked on settings `target`: the preset's values replace
 ## the target's of those names, the target's others and its framing stay. In
@@ -113,7 +132,7 @@ pub class DevelopSession:
     ## The film preset copied (`copy_film`), and the photo's preset mark
     ## (preset_marks.luc) the photos it is pasted on take.
     var film_copied: str? = none
-    pub var film_mark: int = 0
+    pub var film_mark: str = ""
     pub var on_status: func(str) -> unit!? = none
     ## Told after a photo is sent to be developed again (the window shows it busy).
     pub var on_requested: func() -> unit!? = none
@@ -320,6 +339,12 @@ pub class DevelopSession:
 
     # mark: presets ===========================================================================
 
+    ## What a photo with preset mark `mark` and settings `text` was given: its
+    ## mark, or for one without (given a look before marks were kept), the
+    ## film look, else the start, its settings carry whole.
+    pub func mark_of(self, mark: str, text: str) -> str!:
+        return mark if mark != "" else carried_mark(text)
+
     ## The developed photo's settings as a saved preset holds them: without its
     ## framing, and naming its recipe even when it is the default one; none
     ## without a developed photo.
@@ -345,10 +370,16 @@ pub class DevelopSession:
             say(text)
 
 test "a pasted film preset replaces the film whole and keeps the photo's light and framing":
-    let copied = film_part("film_stock=1;film_grain=110;exposure=1;temperature=3200")
-    let pasted = stacked(copied, "film_stock=3;develop_time=4;temperature=4000;crop_left=0.1")
+    let copied = film_part("film_stock=Kodak EXR 500T 5298;film_grain=110;exposure=1;temperature=3200")
+    let pasted = stacked(copied, "film_stock=Kodak Vision 500T 5279;develop_time=4;temperature=4000;crop_left=0.1")
     let look = settings.look(pasted)
     assert(look.get("film_stock") == 1.0 and look.get("film_grain") == 110.0)
     # The target's own development is gone, its light and framing stay.
     assert(look.get("develop_time") == settings.look("").get("develop_time"))
     assert(look.get("temperature") == 4000.0 and look.get("crop_left") == 0.1 and look.get("exposure") == 0.0)
+
+test "a photo given a look carries its mark":
+    let given = stacked(looks.text(0), "exposure=0.5;crop_left=0.1")
+    assert(carried_mark(given) == preset_marks.for_look(0))
+    assert(carried_mark(stacked(settings.mode_text(1), "exposure=0.5")) == preset_marks.for_start(1))
+    assert(carried_mark("exposure=0.5;film_grain=150") == "")

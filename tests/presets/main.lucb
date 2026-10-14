@@ -1,5 +1,6 @@
 ## Presets round-trip through a fresh catalog: save, save again by the same name,
-## rename, change what the Library shows, delete, and read back after reopening. The catalog is made in the folder
+## rename, change what the Library shows, delete, folders (made, saved into,
+## moved into, renamed, deleted), and read back after reopening. The catalog is made in the folder
 ## given, or in a temporary folder under build/ that is removed after. Prints PASS
 ## or traps.
 import c
@@ -64,7 +65,35 @@ func check(folder: str) -> !:
     # The next preset takes a fresh id, not the deleted one's.
     let fresh = try presets.save_preset(store, list, "Fresh", "", "")
     assert(fresh != warm and fresh != mono)
+    # Folders: made, a preset saved into one and one moved into the other;
+    # deleting a folder leaves its presets in none.
+    list.release()
+    list = try names(store)
+    let portraits = try presets.make_folder(store, list, "Portraits")
+    list.release()
+    list = try names(store)
+    let night = try presets.make_folder(store, list, "Night")
+    list.release()
+    list = try names(store)
+    let skin = try presets.save_preset(store, list, "Skin", "exposure=0.3", "exposure", portraits)
+    try presets.move_preset(store, mono, night)
+    list.release()
+    list = try names(store)
+    var known = try list.get()
+    assert(known.folder_count() == 2 and known.folder_name(0) == "Night" and known.folder_name(1) == "Portraits")
+    assert(known.folder(known.position_of(skin)) == portraits and known.folder(known.position_of(mono)) == night)
+    assert(known.folder(known.position_of(fresh)) == 0)
+    try presets.rename_folder(store, night, "Nights")
+    try presets.delete_folder(store, list, portraits)
     list.release()
     (try store.get()).close()
     store.release()
-    print("PASS presets save, replace, rename, expose, delete and reopen")
+    store = try prism.Store.open(path.value)
+    list = try names(store)
+    known = try list.get()
+    assert(known.folder_count() == 1 and known.folder_name(0) == "Nights" and known.folder_id(0) == night)
+    assert(known.folder(known.position_of(skin)) == 0 and known.folder(known.position_of(mono)) == night)
+    list.release()
+    (try store.get()).close()
+    store.release()
+    print("PASS presets save, replace, rename, expose, delete, fold into folders and reopen")

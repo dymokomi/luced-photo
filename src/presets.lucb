@@ -1,14 +1,21 @@
 ## Presets: named develop settings kept in the library's catalog, beside the
-## photos, in an identity of their own:
+## photos, in an identity of their own, and the folders they are kept in, in
+## another:
 ##
+##   presets
 ##     /state    next       the id the next preset takes
 ##     /p<id>    preset     id, name, settings (the develop's text form, without
 ##                          framing: develop_session.luc decides what that is),
 ##                          exposed (the parameters the Library mode shows for a
-##                          photo with this preset, "|" between)
+##                          photo with this preset, "|" between), folder (a
+##                          preset folder's id, 0 none)
+##   preset_folders
+##     /state    next       the id the next folder takes
+##     /f<id>    folder     id, name
 ##
-## Luce reads them all into a PresetList, sorted by name, and writes one preset
-## at a time; a list read before a write is read again to see it.
+## Luce reads them all into a PresetList, presets and folders each sorted by
+## name, and writes one change at a time; a list read before a write is read
+## again to see it.
 import interop
 import memory
 from luce_prism import prism
@@ -16,6 +23,7 @@ from luce_std.collections import TextPool, List
 from store_rows import Writer, compare_names, text_of, integer_of
 
 pub let presets_identity: str = "presets"
+pub let folders_identity: str = "preset_folders"
 
 ## What a new preset shows in the Library mode until it is chosen: the
 ## exposure and the white balance.
@@ -26,12 +34,19 @@ pub struct SavedPreset:
     pub var name: str
     pub var settings: str
     pub var exposed: str
+    pub var folder: i64
+
+pub struct PresetFolder:
+    pub var id: i64
+    pub var name: str
 
 ## Every preset, by name; text kept in `pool`.
 pub struct PresetList:
     var presets: List[SavedPreset]
+    var folders: List[PresetFolder]
     var pool: TextPool
     var next: i64
+    var next_folder: i64
 
     pub func count() -> i64:
         return (i64)self.presets.length()
@@ -50,6 +65,23 @@ pub struct PresetList:
     ## The parameters the Library mode shows, "|" between.
     pub func exposed(at: i64) -> str:
         return self.preset(at).exposed
+    ## The folder it is in (a folder's id), 0 none.
+    pub func folder(at: i64) -> i64:
+        return self.preset(at).folder
+
+    ## The folders, by name: how many, and folder `at`'s id and name.
+    pub func folder_count() -> i64:
+        return (i64)self.folders.length()
+    pub func folder_id(at: i64) -> i64:
+        return self.folders.at((usize)at).id
+    pub func folder_name(at: i64) -> str:
+        return self.folders.at((usize)at).name
+    ## The position of the folder with id `id`, or -1.
+    pub func folder_position_of(id: i64) -> i64:
+        for (at, folder) in self.folders.view().indexed():
+            if folder.id == id:
+                return (i64)at
+        return -1
 
     ## The position of the preset with id `id`, or -1.
     pub func position_of(id: i64) -> i64:
@@ -67,6 +99,7 @@ pub struct PresetList:
 
     pub func close():
         self.presets.destroy()
+        self.folders.destroy()
         self.pool.destroy()
 
 pub let preset_list_type: interop.Type[PresetList] = interop.Type[PresetList]("PresetList", PresetList.close, closeable = true)
@@ -81,19 +114,41 @@ func collect(context: void*?, view: const prism.RowView*) -> !:
     let name = try into.pool.keep_text((try text_of(view, "name")).bytes)
     let settings = try into.pool.keep_text((try text_of(view, "settings")).bytes)
     let exposed = try into.pool.keep_text((try text_of(view, "exposed")).bytes)
-    try into.presets.append(SavedPreset(id = id, name = name, settings = settings, exposed = exposed))
+    try into.presets.append(SavedPreset(id = id, name = name, settings = settings, exposed = exposed, folder = try integer_of(view, "folder")))
     if id >= into.next:
         into.next = id + 1
 
+func collect_folder(context: void*?, view: const prism.RowView*) -> !:
+    let into = (PresetList*)(context else error(prism.invalid, "no preset folders"))
+    if view.path() == "/state":
+        into.next_folder = try integer_of(view, "next")
+        return
+    let id = try integer_of(view, "id")
+    try into.folders.append(PresetFolder(id = id, name = try into.pool.keep_text((try text_of(view, "name")).bytes)))
+    if id >= into.next_folder:
+        into.next_folder = id + 1
+
 ## Every preset in `store`, sorted by name.
 pub func read_presets(store: interop.Reference[prism.Store]) -> interop.Reference[PresetList]!:
-    var list = PresetList(next = 1)
+    var list = PresetList(next = 1, next_folder = 1)
     errdefer list.close()
     let held = try store.get()
     if try held.mounted(presets_identity):
         let snap = try held.snapshot_identity(presets_identity)
         defer snap.release()
         try (try snap.get()).each_child("/", collect, &list)
+    if try held.mounted(folders_identity):
+        let snap = try held.snapshot_identity(folders_identity)
+        defer snap.release()
+        try (try snap.get()).each_child("/", collect_folder, &list)
+    let folders = list.folders.items()
+    for at in 1..<folders.length:
+        let moving = folders[at]
+        var to = at
+        while to > 0 and compare_names(folders[to - 1].name, moving.name) > 0:
+            folders[to] = folders[to - 1]
+            to -= 1
+        folders[to] = moving
     # Few presets: an insertion sort.
     let items = list.presets.items()
     for at in 1..<items.length:
@@ -103,19 +158,23 @@ pub func read_presets(store: interop.Reference[prism.Store]) -> interop.Referenc
             items[to] = items[to - 1]
             to -= 1
         items[to] = moving
-    let made = try new PresetList(presets = list.presets, pool = list.pool, next = list.next) in memory.heap
+    let made = try new PresetList(presets = list.presets, folders = list.folders, pool = list.pool, next = list.next,
+                                  next_folder = list.next_folder) in memory.heap
     return try interop.Reference[PresetList].adopt(made, preset_list_type, memory.heap)
 
 ## Keep `settings` as the preset named `name`, showing `exposed` in the
 ## Library mode: the one of that name (ignoring case) in `list` takes them,
-## else a new preset. Its id.
-pub func save_preset(store: interop.Reference[prism.Store], list: interop.Reference[PresetList], name: str, settings: str, exposed: str) -> i64!:
+## else a new preset in folder `folder` (0 none). Its id.
+pub func save_preset(store: interop.Reference[prism.Store], list: interop.Reference[PresetList], name: str, settings: str, exposed: str,
+                     folder: i64 = 0) -> i64!:
     let known = try list.get()
     var writer = try Writer.begin(try store.get(), presets_identity, "/p")
     defer writer.close()
     let found = known.position_of_name(name)
     let id = known.id(found) if found >= 0 else known.next
     let path = try writer.add(id, "preset") if found < 0 else try writer.at(id)
+    if found < 0:
+        try writer.integer(path, "folder", folder)
     try writer.text(path, "name", name)
     try writer.text(path, "settings", settings)
     try writer.text(path, "exposed", exposed)
@@ -145,6 +204,57 @@ pub func rename_preset(store: interop.Reference[prism.Store], id: i64, name: str
 ## Remove preset `id`.
 pub func delete_preset(store: interop.Reference[prism.Store], id: i64) -> !:
     var writer = try Writer.begin(try store.get(), presets_identity, "/p")
+    defer writer.close()
+    let path = try writer.at(id)
+    if not try (try writer.session.get()).contains(path):
+        return
+    try (try writer.session.get()).remove(path)
+    try writer.commit()
+
+## Put preset `id` into folder `folder` (0: none).
+pub func move_preset(store: interop.Reference[prism.Store], id: i64, folder: i64) -> !:
+    var writer = try Writer.begin(try store.get(), presets_identity, "/p")
+    defer writer.close()
+    let path = try writer.at(id)
+    if not try (try writer.session.get()).contains(path):
+        return
+    try writer.integer(path, "folder", folder)
+    try writer.commit()
+
+## A new preset folder named `name`; its id.
+pub func make_folder(store: interop.Reference[prism.Store], list: interop.Reference[PresetList], name: str) -> i64!:
+    let known = try list.get()
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
+    defer writer.close()
+    let id = known.next_folder
+    let path = try writer.add(id, "folder")
+    try writer.text(path, "name", name)
+    try writer.commit()
+    return id
+
+## Give preset folder `id` the name `name`.
+pub func rename_folder(store: interop.Reference[prism.Store], id: i64, name: str) -> !:
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
+    defer writer.close()
+    let path = try writer.at(id)
+    if not try (try writer.session.get()).contains(path):
+        return
+    try writer.text(path, "name", name)
+    try writer.commit()
+
+## Remove preset folder `id`, its presets left in no folder.
+pub func delete_folder(store: interop.Reference[prism.Store], list: interop.Reference[PresetList], id: i64) -> !:
+    let known = try list.get()
+    var presets = try Writer.begin(try store.get(), presets_identity, "/p")
+    defer presets.close()
+    var moved = false
+    for preset in known.presets.view():
+        if preset.folder == id:
+            try presets.integer(try presets.at(preset.id), "folder", 0)
+            moved = true
+    if moved:
+        try presets.commit()
+    var writer = try Writer.begin(try store.get(), folders_identity, "/f")
     defer writer.close()
     let path = try writer.at(id)
     if not try (try writer.session.get()).contains(path):

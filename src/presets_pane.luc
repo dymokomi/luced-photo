@@ -1,16 +1,18 @@
-## The Presets pane, in the Library mode: the starts a photo begins from
-## (Television, Cinema, Slide, Black & White, Super Panavision 70…: a chain of
-## stages and a stock), the library's saved presets (a photo's settings, every
-## stage's values), and the looks of particular pictures luce-develop documents
-## ("Film · Munich (2005)"). A click gives the row to the selected photos
-## (develop_session.luc says how). A saved
-## preset also names the parameters the Library mode shows for its photos
-## (expose_dialog.luc): asked when it is saved, changed from its menu. The
-## footer saves the developed photo's settings as a new preset, saves them over
-## the chosen one, renames it and deletes it; the row's menu (right-click) does
-## the same for the row pressed. Presets live in the catalog (presets.lucb), so
+## The Presets pane, in the Library mode, as folders: Starts (the recipes a
+## photo begins from: Television, Cinema, Slide, Black & White…), Film Looks
+## (the looks of particular pictures luce-develop documents), the library's own
+## folders of saved presets, then the saved presets in no folder. A click on a
+## folder opens or closes it; a click on a row gives it to the selected photos
+## (develop_session.luc says how). The row the photo shown was last given is
+## highlighted (preset_marks.luc), its folder opened. A saved preset also names
+## the parameters the Library mode shows for its photos (expose_dialog.luc):
+## asked when it is saved, changed from its menu. The footer saves the
+## developed photo's settings as a new preset (into the folder chosen), makes a
+## folder, saves over the chosen preset, renames and deletes a preset or a
+## folder; the row's menu (right-click) does the same and moves a preset into
+## a folder. Presets and their folders live in the catalog (presets.lucb), so
 ## they travel with the library.
-from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font
+from luce_ui.ui import Panel, VStack, Shelf, Spacer, Size, Button, ButtonStyle, ListView, ListItem, ContextMenu, Command, TextPrompt, ConfirmDialog, Font, IconKind
 from interop import Connection
 from photo_library import PhotoLibrary
 from expose_dialog import ExposeDialog
@@ -19,6 +21,10 @@ from luce_develop import looks
 import preset_marks
 from luce_develop import recipe
 from luce_develop import settings
+
+## The built-in folders' keys (a library folder's is its id, above 0).
+let starts_folder: int = -1
+let looks_folder: int = -2
 
 pub class PresetsPane:
     pub let panel: Panel
@@ -32,24 +38,38 @@ pub class PresetsPane:
     let rename_command: Command
     let delete_command: Command
     let expose_command: Command
+    let out_command: Command
+    ## "Move to …" commands, made for each opening of the menu.
+    var move_commands: list[Command] = []
+    var move_connections: list[Connection] = []
     pub let expose: ExposeDialog
     let font: Font
     var connections: list[Connection] = []
-    ## What the prompt asks for: "save" a new preset's name or "rename" the
-    ## preset with id `renaming`.
+    ## What each row is: a preset mark (preset_marks.luc), or "" for a folder;
+    ## a folder row's key (starts_folder, looks_folder or a folder's id), 0 for
+    ## a preset row; and the folders closed.
+    var row_marks: list[str] = []
+    var row_folders: list[int] = []
+    var closed: set[int] = {}
+    ## What the prompt asks for: "save" a new preset's name, "folder" a new
+    ## folder's, "rename" the preset or "rename_folder" the folder with id
+    ## `renaming`.
     var asking: str = ""
     var renaming: int = -1
-    ## The settings a new preset takes: the photo's when Save was pressed; and its name.
+    ## The settings a new preset takes: the photo's when Save was pressed; its
+    ## name, and the folder it goes in.
     var pending: str = ""
     var pending_name: str = ""
+    var pending_folder: int = 0
     ## The preset whose exposed parameters the dialog edits (-1: a new one).
     var exposing: int = -1
+    ## What Delete asks about: a preset's id, or a folder's (`deleting_folder`).
     var deleting: int = -1
+    var deleting_folder: bool = false
     ## The developed photo's settings as a saved preset holds them, none without one.
     pub var current: func() -> str?!? = none
-    ## A row was clicked: its name, settings and the mark the photos keep of it
-    ## (preset_marks.luc).
-    pub var on_apply: func(str, str, int) -> unit!? = none
+    ## A row was clicked: its name, settings and the mark the photos keep of it.
+    pub var on_apply: func(str, str, str) -> unit!? = none
     pub var on_status: func(str) -> unit!? = none
 
     pub func init(self, library: PhotoLibrary, font: Font) -> unit!:
@@ -57,12 +77,13 @@ pub class PresetsPane:
         self.font = font
         self.rows = ListView([], font = font)
         self.rows.layout().set_flex()
-        self.connections.append(self.rows.on_activate(self.apply))
+        self.connections.append(self.rows.on_activate(self.clicked))
         self.apply_command = Command("Apply to Selected Photos", id = "preset_apply")
         self.update_command = Command("Update with Current Settings", id = "preset_update")
-        self.rename_command = Command("Rename Preset…", id = "preset_rename")
-        self.delete_command = Command("Delete Preset…", id = "preset_delete")
+        self.rename_command = Command("Rename…", id = "preset_rename")
+        self.delete_command = Command("Delete…", id = "preset_delete")
         self.expose_command = Command("Show in Library…", id = "preset_expose")
+        self.out_command = Command("Move Out of Its Folder", id = "preset_out")
         self.connections.append(self.expose_command.on_trigger(self.expose_chosen))
         self.expose = ExposeDialog(font)
         self.expose.chosen = self.exposed
@@ -71,7 +92,9 @@ pub class PresetsPane:
         self.connections.append(self.update_command.on_trigger(self.update_chosen))
         self.connections.append(self.rename_command.on_trigger(self.rename_chosen))
         self.connections.append(self.delete_command.on_trigger(self.delete_chosen))
-        self.row_menu = ContextMenu(self.rows, [self.apply_command, self.update_command, self.expose_command, self.rename_command, Command("", divider = true), self.delete_command], font = font)
+        self.connections.append(self.out_command.on_trigger(func () -> unit!:
+            self.move_chosen(0)))
+        self.row_menu = ContextMenu(self.rows, [self.apply_command], font = font)
         self.connections.append(self.row_menu.on_open(self.fit_menu))
         self.prompt = TextPrompt(font = font)
         self.connections.append(self.prompt.on_submit(self.submitted))
@@ -79,8 +102,9 @@ pub class PresetsPane:
         self.connections.append(self.confirm.on_choose(self.chosen_delete))
         let content = VStack([self.row_menu, self.prompt, self.confirm, self.expose.dialog], spacing = 0.0)
         content.layout().set_flex()
-        let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("save", self.update_chosen),
-                           self.shelf_button("text-tool", self.rename_chosen), Spacer(), self.shelf_button("trash", self.delete_chosen)])
+        let shelf = Shelf([self.shelf_button("plus", self.save_new), self.shelf_button("folder-new", self.new_folder),
+                           self.shelf_button("save", self.update_chosen), self.shelf_button("text-tool", self.rename_chosen), Spacer(),
+                           self.shelf_button("trash", self.delete_chosen)])
         self.panel = Panel("Presets", content, minimum = Size(220.0, 120.0), closable = false, footer = shelf, id = "presets")
         self.show()
 
@@ -91,57 +115,179 @@ pub class PresetsPane:
         button.layout().set_size(self.font.line_height() + 3.0, self.font.line_height() + 3.0)
         return button
 
-    ## List the starts, the library's presets and the film looks, keeping the
-    ## chosen preset chosen.
-    pub func show(self, chosen_id: int = -1) -> unit!:
+    # mark: rows ===============================================================================
+
+    ## List the folders and what is open in them, the row with mark `chosen`
+    ## chosen ("" none).
+    pub func show(self, chosen: str = "") -> unit!:
         let saved = self.library.presets
         var items: list[ListItem] = []
-        for at in 0..<recipe.mode_total():
-            items.append(ListItem(text = f"Start · {recipe.mode_name(at)}"))
+        self.row_marks = []
+        self.row_folders = []
+        self.add_folder(items, starts_folder, "Starts")
+        if not (starts_folder in self.closed):
+            for at in 0..<recipe.mode_total():
+                self.add_row(items, recipe.mode_name(at), preset_marks.for_start(at))
+        self.add_folder(items, looks_folder, "Film Looks")
+        if not (looks_folder in self.closed):
+            for at in 0..<looks.count():
+                self.add_row(items, looks.name(at), preset_marks.for_look(at))
+        for folder in 0..<saved.folder_count():
+            let id = saved.folder_id(folder)
+            self.add_folder(items, id, saved.folder_name(folder))
+            if not (id in self.closed):
+                for at in 0..<saved.count():
+                    if saved.folder(at) == id:
+                        self.add_row(items, saved.name(at), preset_marks.for_saved(saved.id(at)))
         for at in 0..<saved.count():
-            items.append(ListItem(text = saved.name(at)))
-        for at in 0..<looks.count():
-            items.append(ListItem(text = f"Film · {looks.name(at)}"))
+            if saved.folder(at) == 0:
+                self.row_marks.append(preset_marks.for_saved(saved.id(at)))
+                self.row_folders.append(0)
+                items.append(ListItem(text = saved.name(at)))
         self.rows.set_items(items)
-        if chosen_id > 0:
-            self.rows.select(self.row_of(chosen_id))
+        self.rows.select(self.row_of(chosen))
         self.panel.set_text("Presets" if saved.count() == 0 else f"Presets · {saved.count()}")
 
-    ## The rows are the starts, then the library's presets, then the film
-    ## looks: row `row`'s mark (preset_marks.luc; 0 for none), and the row of
-    ## mark `mark` (-1 for none).
-    pub func mark_of(self, row: int) -> int:
-        let saved = self.library.presets
-        let modes = recipe.mode_total()
-        if row >= 0 and row < modes:
-            return preset_marks.for_start(row)
-        if row >= modes and row < modes + saved.count():
-            return saved.id(row - modes)
-        if row >= modes + saved.count() and row < modes + saved.count() + looks.count():
-            return preset_marks.for_look(row - modes - saved.count())
-        return 0
-    pub func row_of(self, mark: int) -> int:
-        let saved = self.library.presets
-        let modes = recipe.mode_total()
-        if mark > 0:
-            let found = saved.position_of(mark)
-            return modes + found if found >= 0 else -1
-        if preset_marks.start_of(mark) >= 0:
-            return preset_marks.start_of(mark)
-        if preset_marks.look_of(mark) >= 0:
-            return modes + saved.count() + preset_marks.look_of(mark)
+    func add_folder(self, items: list[ListItem], key: int, name: str) -> unit!:
+        self.row_marks.append("")
+        self.row_folders.append(key)
+        items.append(ListItem(text = name, icon = IconKind.folder if key in self.closed else IconKind.folder_open))
+
+    func add_row(self, items: list[ListItem], name: str, mark: str) -> unit!:
+        self.row_marks.append(mark)
+        self.row_folders.append(0)
+        items.append(ListItem(text = "   " + name))
+
+    ## Row `row`'s mark ("" for a folder or none), and the row of mark `mark` (-1 none).
+    pub func mark_of(self, row: int) -> str:
+        return self.row_marks[row] if row >= 0 and row < self.row_marks.length else ""
+    pub func row_of(self, mark: str) -> int:
+        if mark == "":
+            return -1
+        for (at, held) in self.row_marks.indexed():
+            if held == mark:
+                return at
         return -1
+
+    ## The folder a mark's row is in (its key), 0 for none.
+    func folder_of(self, mark: str) -> int:
+        if preset_marks.start_of(mark) >= 0:
+            return starts_folder
+        if preset_marks.look_of(mark) >= 0:
+            return looks_folder
+        let saved = self.library.presets
+        let found = saved.position_of(preset_marks.saved_of(mark))
+        return saved.folder(found) if found >= 0 else 0
 
     ## The library's preset chosen in the list (its position), or -1.
     func chosen(self) -> int:
-        let mark = self.mark_of(self.rows.selected_index())
-        return self.library.presets.position_of(mark) if mark > 0 else -1
+        return self.library.presets.position_of(preset_marks.saved_of(self.mark_of(self.rows.selected_index())))
 
+    ## The library folder chosen: the folder row's, or the chosen preset's (0 none).
+    func chosen_folder(self) -> int:
+        let row = self.rows.selected_index()
+        if row < 0 or row >= self.row_folders.length:
+            return 0
+        if self.row_folders[row] > 0:
+            return self.row_folders[row]
+        let at = self.chosen()
+        return self.library.presets.folder(at) if at >= 0 else 0
+
+    ## A click: a folder opens or closes, a row is given to the selected photos.
+    func clicked(self, row: int) -> unit!:
+        if row >= 0 and row < self.row_folders.length and self.row_folders[row] != 0:
+            let key = self.row_folders[row]
+            if key in self.closed:
+                _ = self.closed.remove(key)
+            else:
+                self.closed.insert(key)
+            self.show()
+            self.rows.select(self.row_of_folder(key))
+            return
+        self.apply(row)
+
+    func row_of_folder(self, key: int) -> int:
+        for (at, held) in self.row_folders.indexed():
+            if held == key:
+                return at
+        return -1
+
+    ## Stack row `at` (a start, a film look or a preset) on the selected
+    ## photos, as a click does.
+    pub func apply(self, at: int) -> unit!:
+        self.apply_mark(self.mark_of(at))
+
+    ## Stack what mark `mark` names on the selected photos.
+    pub func apply_mark(self, mark: str) -> unit!:
+        let tell = self.on_apply else return
+        let saved = self.library.presets
+        let found = saved.position_of(preset_marks.saved_of(mark))
+        if found >= 0:
+            tell(saved.name(found), saved.settings(found), mark)
+        elif preset_marks.start_of(mark) >= 0:
+            let start = preset_marks.start_of(mark)
+            tell(recipe.mode_name(start), settings.mode_text(start), mark)
+        elif preset_marks.look_of(mark) >= 0:
+            let look = preset_marks.look_of(mark)
+            tell(looks.name(look), looks.text(look), mark)
+
+    ## Highlight what the photo shown was last given (its mark), its folder
+    ## opened, or nothing: a highlighted row is always the photo's own, so a
+    ## click on any row shows as a change.
+    pub func follow(self, mark: str) -> unit!:
+        let folder = self.folder_of(mark) if mark != "" else 0
+        if folder != 0 and folder in self.closed:
+            _ = self.closed.remove(folder)
+            self.show(mark)
+            return
+        let row = self.row_of(mark)
+        if row != self.rows.selected_index():
+            self.rows.select(row)
+
+    # mark: the menu ===========================================================================
+
+    ## The menu for the row pressed: a preset's commands and a move into each
+    ## folder; a folder's rename and delete; a start's or look's Apply.
     func fit_menu(self) -> unit!:
-        let own = self.chosen() >= 0
-        self.apply_command.set_enabled(self.rows.selected_index() >= 0)
-        for command in [self.update_command, self.expose_command, self.rename_command, self.delete_command]:
-            command.set_enabled(own)
+        for connection in self.move_connections:
+            connection.disconnect()
+        self.move_connections = []
+        self.move_commands = []
+        let row = self.rows.selected_index()
+        let saved = self.library.presets
+        if row >= 0 and row < self.row_folders.length and self.row_folders[row] > 0:
+            self.row_menu.set_commands([self.rename_command, Command("", divider = true), self.delete_command])
+            return
+        let at = self.chosen()
+        if at < 0:
+            self.row_menu.set_commands([self.apply_command])
+            return
+        var commands = [self.apply_command, self.update_command, self.expose_command, self.rename_command, Command("", divider = true)]
+        for folder in 0..<saved.folder_count():
+            let id = saved.folder_id(folder)
+            if id == saved.folder(at):
+                continue
+            let move = Command(f"Move to “{saved.folder_name(folder)}”", id = f"preset_move_{id}")
+            self.move_connections.append(move.on_trigger(func () -> unit!:
+                self.move_chosen(id)))
+            self.move_commands.append(move)
+            commands.append(move)
+        if saved.folder(at) != 0:
+            commands.append(self.out_command)
+        commands = commands + [Command("", divider = true), self.delete_command]
+        self.row_menu.set_commands(commands)
+
+    ## Put the chosen preset into folder `folder` (0: none).
+    func move_chosen(self, folder: int) -> unit!:
+        let at = self.chosen()
+        if at < 0:
+            return
+        let id = self.library.presets.id(at)
+        self.library.move_preset(id, folder)
+        _ = self.closed.remove(folder)
+        self.show(preset_marks.for_saved(id))
+
+    # mark: saving =============================================================================
 
     ## The developed photo's settings, or none (and why) without one.
     func current_settings(self) -> str?!:
@@ -151,37 +297,16 @@ pub class PresetsPane:
         self.tell("Select a photo whose settings to keep.")
         return none
 
-    ## Stack row `at` (a start, a preset or a film look) on the selected
-    ## photos, as a click does.
-    pub func apply(self, at: int) -> unit!:
-        let mark = self.mark_of(at)
-        let tell = self.on_apply else return
-        let saved = self.library.presets
-        if mark > 0:
-            let found = saved.position_of(mark)
-            tell(saved.name(found), saved.settings(found), mark)
-        elif preset_marks.start_of(mark) >= 0:
-            let start = preset_marks.start_of(mark)
-            tell(recipe.mode_name(start), settings.mode_text(start), mark)
-        elif preset_marks.look_of(mark) >= 0:
-            let look = preset_marks.look_of(mark)
-            tell(looks.name(look), looks.text(look), mark)
-
-    ## Highlight what the photo shown was last given (its mark), or nothing: a
-    ## highlighted row is always the photo's own, so a click on any row shows
-    ## as a change.
-    pub func follow(self, mark: int) -> unit!:
-        let row = self.row_of(mark)
-        if row != self.rows.selected_index():
-            self.rows.select(row)
-
-    # mark: saving =============================================================================
-
     func save_new(self) -> unit!:
         let text = self.current_settings() else return
         self.pending = text
+        self.pending_folder = self.chosen_folder()
         self.asking = "save"
-        self.prompt.open("Save the photo’s settings as the preset", self.free_name(), accept = "Next")
+        self.prompt.open("Save the photo’s settings as the preset", self.free_name("Preset", false), accept = "Next")
+
+    func new_folder(self) -> unit!:
+        self.asking = "folder"
+        self.prompt.open("A folder for presets", self.free_name("Folder", true), accept = "Make")
 
     func update_chosen(self) -> unit!:
         let at = self.chosen()
@@ -191,16 +316,24 @@ pub class PresetsPane:
         let text = self.current_settings() else return
         let name = self.library.presets.name(at)
         let id = self.library.save_preset(name, text, self.library.presets.exposed(at))
-        self.show(id)
+        self.show(preset_marks.for_saved(id))
         self.tell(f"Updated “{name}” with the photo’s settings.")
 
+    ## Rename the chosen preset, or the chosen folder.
     func rename_chosen(self) -> unit!:
+        let saved = self.library.presets
+        let row = self.rows.selected_index()
+        if row >= 0 and row < self.row_folders.length and self.row_folders[row] > 0:
+            self.asking = "rename_folder"
+            self.renaming = self.row_folders[row]
+            self.prompt.open("Rename the folder", saved.folder_name(saved.folder_position_of(self.renaming)), accept = "Rename")
+            return
         let at = self.chosen()
         if at < 0:
             return
         self.asking = "rename"
-        self.renaming = self.library.presets.id(at)
-        self.prompt.open("Rename the preset", self.library.presets.name(at), accept = "Rename")
+        self.renaming = saved.id(at)
+        self.prompt.open("Rename the preset", saved.name(at), accept = "Rename")
 
     func submitted(self, typed: str) -> unit!:
         let name = typed.trim()
@@ -208,20 +341,29 @@ pub class PresetsPane:
         self.asking = ""
         if name == "":
             return
+        let saved = self.library.presets
         if asking == "save":
             # Then which parameters the Library mode shows for it.
             self.pending_name = name
             self.exposing = -1
-            let known = self.library.presets.position_of_name(name)
-            let shown = self.library.presets.exposed(known) if known >= 0 else presets.default_exposed
+            let known = saved.position_of_name(name)
+            let shown = saved.exposed(known) if known >= 0 else presets.default_exposed
             self.expose.open(f"Save “{name}”: what the Library shows", self.pending, shown)
+        elif asking == "folder":
+            let id = self.library.make_preset_folder(name)
+            self.show()
+            self.rows.select(self.row_of_folder(id))
         elif asking == "rename":
-            let taken = self.library.presets.position_of_name(name)
-            if taken >= 0 and self.library.presets.id(taken) != self.renaming:
+            let taken = saved.position_of_name(name)
+            if taken >= 0 and saved.id(taken) != self.renaming:
                 self.tell(f"A preset is already named “{name}”.")
                 return
             self.library.rename_preset(self.renaming, name)
-            self.show(self.renaming)
+            self.show(preset_marks.for_saved(self.renaming))
+        elif asking == "rename_folder":
+            self.library.rename_preset_folder(self.renaming, name)
+            self.show()
+            self.rows.select(self.row_of_folder(self.renaming))
 
     ## The parameters the Library shows for the chosen preset: the dialog.
     func expose_chosen(self) -> unit!:
@@ -236,40 +378,62 @@ pub class PresetsPane:
     func exposed(self, shown: str) -> unit!:
         if self.exposing >= 0:
             self.library.set_exposed(self.exposing, shown)
-            self.show(self.exposing)
+            self.show(preset_marks.for_saved(self.exposing))
             self.exposing = -1
             return
         let name = self.pending_name
         let replacing = self.library.presets.position_of_name(name) >= 0
-        let id = self.library.save_preset(name, self.pending, shown)
-        self.show(id)
+        let id = self.library.save_preset(name, self.pending, shown, self.pending_folder)
+        _ = self.closed.remove(self.pending_folder)
+        self.show(preset_marks.for_saved(id))
         self.tell(f"Updated “{name}”." if replacing else f"Saved the preset “{name}”.")
 
-    ## "Preset", else "Preset 2", "Preset 3"… : a name no preset has.
-    func free_name(self) -> str:
+    ## `base`, else "`base` 2", "`base` 3"…: a name no preset (or, for a
+    ## folder, no folder) has.
+    func free_name(self, base: str, folder: bool) -> str:
         let saved = self.library.presets
-        var name = "Preset"
+        var name = base
         var number = 2
-        while saved.position_of_name(name) >= 0:
-            name = f"Preset {number}"
+        while (self.folder_named(name) if folder else saved.position_of_name(name) >= 0):
+            name = f"{base} {number}"
             number += 1
         return name
 
+    func folder_named(self, name: str) -> bool:
+        let saved = self.library.presets
+        for at in 0..<saved.folder_count():
+            if saved.folder_name(at).lower() == name.lower():
+                return true
+        return false
+
     # mark: deleting ===========================================================================
 
+    ## Delete the chosen preset, or the chosen folder (its presets stay, in no folder).
     func delete_chosen(self) -> unit!:
+        let saved = self.library.presets
+        let row = self.rows.selected_index()
+        if row >= 0 and row < self.row_folders.length and self.row_folders[row] > 0:
+            self.deleting = self.row_folders[row]
+            self.deleting_folder = true
+            let name = saved.folder_name(saved.folder_position_of(self.deleting))
+            self.confirm.open(f"Delete the folder “{name}”? Its presets stay, in no folder.", "Delete", "")
+            return
         let at = self.chosen()
         if at < 0:
             return
-        self.deleting = self.library.presets.id(at)
-        self.confirm.open(f"Delete the preset “{self.library.presets.name(at)}”? Photos keep the settings it gave them.", "Delete", "")
+        self.deleting = saved.id(at)
+        self.deleting_folder = false
+        self.confirm.open(f"Delete the preset “{saved.name(at)}”? Photos keep the settings it gave them.", "Delete", "")
 
     func chosen_delete(self, role: int) -> unit!:
         let id = self.deleting
         self.deleting = -1
         if role != 0 or id < 0:
             return
-        self.library.delete_preset(id)
+        if self.deleting_folder:
+            self.library.delete_preset_folder(id)
+        else:
+            self.library.delete_preset(id)
         self.show()
 
     func tell(self, text: str) -> unit!:
@@ -278,6 +442,8 @@ pub class PresetsPane:
 
     pub func close(self):
         self.expose.close()
+        for connection in self.move_connections:
+            connection.disconnect()
         for connection in self.connections:
             connection.disconnect()
         self.connections.clear()

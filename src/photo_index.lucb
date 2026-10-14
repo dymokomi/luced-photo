@@ -79,7 +79,7 @@ pub struct PhotoIndex:
         return self.photo(at).flag
     pub func label(at: i64) -> i64:
         return self.photo(at).label
-    pub func preset(at: i64) -> i64:
+    pub func preset(at: i64) -> str:
         return self.photo(at).preset
     pub func folder(at: i64) -> i64:
         return self.photo(at).folder
@@ -102,8 +102,8 @@ pub struct PhotoIndex:
         self.stored(at).flag = flag
     pub func set_label(at: i64, label: i64):
         self.stored(at).label = label
-    pub func set_preset(at: i64, preset: i64):
-        self.stored(at).preset = preset
+    pub func set_preset(at: i64, mark: str) -> !:
+        self.stored(at).preset = try self.rows.pool.keep_text(mark.bytes)
     pub func set_folder(at: i64, folder: i64):
         self.stored(at).folder = folder
 
@@ -165,9 +165,12 @@ pub struct PhotoIndex:
         let wanted = self.search.text()
         if wanted.length == 0:
             return true
+        let given = saved_id(photo.preset)
         for id in self.search_presets.view():
-            if photo.preset == id:
+            if given == id:
                 return true
+        if holds(photo.preset, wanted):
+            return true
         for field in [photo.name, photo.make, photo.model, photo.lens, photo.captured, photo.kind]:
             if holds(field, wanted):
                 return true
@@ -246,16 +249,37 @@ pub func read_index(store: interop.Reference[prism.Store]) -> interop.Reference[
     try index.arrange()
     return try interop.Reference[PhotoIndex].adopt(index, photo_index_type, memory.heap)
 
-## Set field `name` ("rating", "flag" or "label") to `value` on photos `ids` in
-## the catalog, in one commit.
+## The saved preset's id a preset mark names ("preset/12"), or -1.
+pub func saved_id(mark: str) -> i64:
+    let bytes = mark.bytes
+    if bytes.length < 8 or (str)bytes[..<7] != "preset/":
+        return -1
+    var id: i64 = 0
+    for byte in bytes[7..]:
+        if byte < '0' or byte > '9':
+            return -1
+        id = id * 10 + (i64)(byte - '0')
+    return id
+
+## Set field `name` ("rating", "flag", "label" or "folder") to `value` on photos
+## `ids` in the catalog, in one commit.
 pub func set_marks(store: interop.Reference[prism.Store], ids: const i64[], name: str, value: i64) -> !:
-    if not (name == "rating" or name == "flag" or name == "label" or name == "preset" or name == "folder"):
-        error(prism.invalid, "only a rating, flag, label, preset or folder is set this way")
+    if not (name == "rating" or name == "flag" or name == "label" or name == "folder"):
+        error(prism.invalid, "only a rating, flag, label or folder is set this way")
     let held = try store.get()
     var batch = try catalog.Batch.begin(held)
     defer batch.close()
     for id in ids:
         try batch.set_mark(id, name, value)
+    try batch.commit()
+
+## Give photos `ids` the preset mark `mark` in the catalog, in one commit.
+pub func set_preset_marks(store: interop.Reference[prism.Store], ids: const i64[], mark: str) -> !:
+    let held = try store.get()
+    var batch = try catalog.Batch.begin(held)
+    defer batch.close()
+    for id in ids:
+        try batch.set_preset(id, mark)
     try batch.commit()
 
 ## Store photo `id`'s develop settings (their text form) in the catalog.

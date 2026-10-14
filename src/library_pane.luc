@@ -10,7 +10,7 @@
 ## capture date or preset holds what is typed. An empty library says how to
 ## fill it, with the import commands at hand; a filter or search that hides
 ## every photo says so.
-from luce_ui.ui import Application, Notifier, ThumbnailGrid, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget, ContextMenu
+from luce_ui.ui import Application, Notifier, ThumbnailGrid, GridFlow, TableView, TableColumn, TableCell, Image, Slider, Text, TextField, HStack, VStack, Spacer, Menu, Command, Font, Panel, Size, Button, ButtonStyle, Widget, ContextMenu
 from properties import camera_name
 from interop import Connection
 from photo_library import PhotoLibrary
@@ -46,8 +46,6 @@ pub class LibraryPane:
     var strip: bool = false
     var listing_before: bool = false
     let search_row: HStack
-    ## The thumbnail size the Library mode keeps, while a filmstrip shows smaller.
-    var library_cell: float = 160.0
     ## Grid items whose thumbnails were asked for and have not arrived.
     var requested: set[int] = {}
     ## The pictures loaded, by photo id: they outlive a refresh, which may move
@@ -71,6 +69,9 @@ pub class LibraryPane:
         self.library = photos
         self.loader = thumbs.start(3, library.thumb_edge)
         self.grid = ThumbnailGrid(photos.index.count(), 160.0, font = font)
+        # A tall pane scrolls down through rows; a wide, short one (the
+        # filmstrip along the bottom of the other modes) scrolls sideways.
+        self.grid.set_flow(GridFlow.automatic)
         # Photos drag onto the Library pane's folders.
         self.grid.set_drag_kind("photos")
         self.count = Text("", font = font, muted = true)
@@ -169,9 +170,9 @@ pub class LibraryPane:
             self.empty_title.set_text("No photos match the filter or search")
             self.empty_hint.set_text("Filter › All Photos and an empty search show them all.")
 
-    ## As the Library mode's grid (`strip` false), with the search and its
-    ## thumbnail size, or as a filmstrip along the bottom of the other modes:
-    ## one row of small thumbnails, no search.
+    ## As the Library mode's grid (`strip` false), with the search, or as a
+    ## filmstrip along the bottom of the other modes: no search, the grid
+    ## only (wide and short, it scrolls sideways).
     pub func set_strip(self, strip: bool) -> unit!:
         # A filmstrip is the grid; the list comes back with the Library mode.
         if strip and self.listing:
@@ -182,11 +183,6 @@ pub class LibraryPane:
             self.show_list(true)
         self.strip = strip
         self.search_row.layout().set_visible(not strip)
-        if strip:
-            self.library_cell = self.grid.cell_size()
-            self.grid.set_cell_size(96.0)
-        else:
-            self.grid.set_cell_size(self.library_cell)
         let lead = self.grid.selected_index()
         if lead >= 0:
             self.grid.reveal(lead)

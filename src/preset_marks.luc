@@ -1,33 +1,49 @@
-## What a photo's "preset" mark says it was last given from the Presets pane:
-## a saved preset (its id, above 0), a start (-1 less the mode's position), a
-## film look (-1001 less the look's position), or nothing (0). The Presets pane
-## highlights it for the photo shown; Properties and the list name it.
+## What a photo's preset mark says it was last given from the Presets pane, by
+## name so it does not depend on any list's order: "start/<mode name>",
+## "look/<look name>", "preset/<id>" for a saved preset (its id: a preset can
+## be renamed), or "" for nothing. The Presets pane highlights it for the photo
+## shown; Properties and the list name it.
 from presets import PresetList
 from luce_develop import recipe
 from luce_develop import looks
+import photo_index
 
-let look_base: int = -1001
+pub func for_start(at: int) -> str:
+    return f"start/{recipe.mode_name(at)}"
 
-pub func for_start(at: int) -> int:
-    return -1 - at
+pub func for_look(at: int) -> str:
+    return f"look/{looks.name(at)}"
 
-pub func for_look(at: int) -> int:
-    return look_base - at
+pub func for_saved(id: int) -> str:
+    return f"preset/{id}"
 
 ## The start mark `mark` names (a mode's position), or -1.
-pub func start_of(mark: int) -> int:
-    let at = -1 - mark
-    return at if mark < 0 and mark > look_base and at < recipe.mode_total() else -1
+pub func start_of(mark: str) -> int:
+    if not mark.starts_with("start/"):
+        return -1
+    for at in 0..<recipe.mode_total():
+        if mark == for_start(at):
+            return at
+    return -1
 
 ## The film look mark `mark` names (its position), or -1.
-pub func look_of(mark: int) -> int:
-    let at = look_base - mark
-    return at if mark <= look_base and at < looks.count() else -1
+pub func look_of(mark: str) -> int:
+    if not mark.starts_with("look/"):
+        return -1
+    for at in 0..<looks.count():
+        if mark == for_look(at):
+            return at
+    return -1
+
+## The saved preset's id mark `mark` names, or -1.
+pub func saved_of(mark: str) -> int:
+    return photo_index.saved_id(mark)
 
 ## What mark `mark` is called, as the Presets pane lists it; "" for none.
-pub func name_of(saved: PresetList, mark: int) -> str:
-    if mark > 0:
-        let found = saved.position_of(mark)
+pub func name_of(saved: PresetList, mark: str) -> str:
+    let id = saved_of(mark)
+    if id >= 0:
+        let found = saved.position_of(id)
         return saved.name(found) if found >= 0 else ""
     let start = start_of(mark)
     if start >= 0:

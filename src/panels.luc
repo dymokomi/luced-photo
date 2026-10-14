@@ -110,16 +110,17 @@ pub class Panels:
         self.presets = PresetsPane(self.library, font)
         self.presets.current = self.session.preset_text
         self.presets.on_status = self.tell
-        self.presets.on_apply = func (name: str, text: str, id: int) -> unit!:
+        self.presets.on_apply = func (name: str, text: str, mark: str) -> unit!:
             let picked = self.library_pane.selection()
             self.session.apply_preset(picked, name, text)
             self.show_activity()
             # The photos remember what they were given (preset_marks.luc); a
             # saved preset's parameters the Library mode then shows.
             if picked.length > 0:
-                self.library.set_marks(picked, "preset", id)
+                self.library.set_preset_mark(picked, mark)
                 self.properties.show(self.library_pane.lead(), picked.length)
                 self.library_pane.refresh_badges(picked)
+                self.presets.follow(mark)
         self.mode_bar = ModeBar(font)
         self.mode_bar.on_pick = self.set_mode
         self.library_pane.on_pick = self.show_selection
@@ -215,7 +216,7 @@ pub class Panels:
             if self.session.paste_film(picked) > 0:
                 # The photos take the copied photo's preset mark, so the
                 # Presets pane and Properties name what they now have.
-                self.library.set_marks(picked, "preset", self.session.film_mark)
+                self.library.set_preset_mark(picked, self.session.film_mark)
                 self.library_pane.refresh_badges(picked)
                 self.show_selection(self.library_pane.lead())
             self.show_activity()))
@@ -499,7 +500,7 @@ pub class Panels:
         self.actions.refresh(lead >= 0)
         self.properties.show(lead, selected)
         if lead < 0:
-            self.presets.follow(0)
+            self.presets.follow("")
             self.session.close_photo()
             # The controls show the defaults, not the photo let go.
             self.properties.develop.show("", 5500.0, 0.0)
@@ -509,7 +510,7 @@ pub class Panels:
         let index = self.library.index
         let id = index.id(lead)
         let other = id != self.session.developing
-        self.presets.follow(index.preset(lead))
+        self.presets.follow(self.session.mark_of(index.preset(lead), index.settings(lead)))
         self.session.open(id, index.settings(lead))
         # The developed picture when it is of these settings; else the camera's
         # preview while the picture is made again.
